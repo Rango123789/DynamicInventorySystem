@@ -9,6 +9,9 @@ Content
 Plugins/InventorySystem/Binaries/
 Plugins/InventorySystem/Intermediate/
 
+.idea/
+.idea/cvs.xml
+
 .vscode
 .vs
 *.VC.db
