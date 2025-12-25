@@ -5,8 +5,10 @@
 #include "CoreMinimal.h"
 #include "InventorySystem.h"
 #include "GameFramework/PlayerController.h"
+#include "Types/CustomFastArrayTypes.h"
 #include "Inv_PlayerController.generated.h"
 
+class UInv_InventoryComponent;
 class UUW_Inv_HUDWidget;
 class UInputAction;
 class UInputMappingContext;
@@ -18,25 +20,29 @@ class INVENTORYSYSTEM_API AInv_PlayerController : public APlayerController
 {
 	GENERATED_BODY()
 public:
-
+	//this to be added in BP_InventoryComponent, this is not the place construct it, hence I decide to make "TWeakObjectPtr" (whatever)
+	TWeakObjectPtr<UInv_InventoryComponent> InventoryComponent;
+	
 protected:
 	AInv_PlayerController();
 	virtual void Tick(float DeltaSeconds) override;
-	void CreateHUDWidget();
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
+	void CreateHUDWidget();
 
 	void Input_PrimaryInteract();
+	UFUNCTION(BlueprintCallable , Category = "Inventory")
+	void Input_ToggleInventory();
 
 	void TraceForItem();
 
-	UPROPERTY(EditAnywhere, meta=(Category="Inventory"))
+	UPROPERTY(EditAnywhere, Category="Inventory")
 	TSubclassOf<UUW_Inv_HUDWidget> HUDWidget_Class;
 	
-	UPROPERTY(BlueprintReadOnly,  meta=(Category="Inventory"))
+	UPROPERTY(BlueprintReadOnly,  Category="Inventory")
 	TObjectPtr<UUW_Inv_HUDWidget> WBP_HUDWidget;
 
-	UPROPERTY(EditAnywhere, meta=(Category="Inventory"))
+	UPROPERTY(EditAnywhere, Category="Inventory")
 	float TraceLength = 500.f;
 
 	/*Shocking news
@@ -51,16 +57,19 @@ protected:
 
 	@@note: the reason why stephen even let it EditAnywhere is that we want to select it from BP so that it can't be wrong (rather than create macro constant like in other courses that could be error-prone)
 	 */
-	UPROPERTY(EditAnywhere, meta=(Category="Inventory"))
+	UPROPERTY(EditAnywhere, Category="Inventory")
 	TEnumAsByte<ECollisionChannel> TraceChannel = ECC_ItemTrace;
 	
 private:
 	//AllowPrivateAccess ="true" - only need if we use "BPReadOnly" or "BPReadWrite" to access in Event Graph
-	UPROPERTY(EditAnywhere, meta=(Category="Inventory")) 
+	UPROPERTY(EditAnywhere, Category="Inventory") 
 	TObjectPtr<UInputMappingContext> IMC_Default_PC;
 	 
-	UPROPERTY(EditAnywhere,  meta=(Category="Inventory"))
+	UPROPERTY(EditAnywhere,  Category="Inventory")
 	TObjectPtr<UInputAction> IA_PrimaryInteract;
+
+	UPROPERTY(EditAnywhere,  Category="Inventory")
+	TObjectPtr<UInputAction> IA_ToggleInventory;
 
 	/*GAS course: and then use IsValid(Actor)
 		UPROPERTY()
@@ -70,7 +79,7 @@ private:
 	*/
 	TWeakObjectPtr<AActor> LastActor;
 	TWeakObjectPtr<AActor> ThisActor;	
-	
+
 
 public:
 

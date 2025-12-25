@@ -7,13 +7,16 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
 #include "InventorySystem.h"
+#include "ActorComponent/Inv_InventoryComponent.h"
 #include "ActorComponent/Inv_ItemComponent.h"
 #include "Blueprint/UserWidget.h"
+#include "Interface/Inv_HighlightInterface.h"
+#include "Net/UnrealNetwork.h"
 #include "Widgets/HUD/UW_Inv_HUDWidget.h"
 
 AInv_PlayerController::AInv_PlayerController()
 {
-	PrimaryActorTick.bCanEverTick = true;	
+	PrimaryActorTick.bCanEverTick = true;
 }
 
 void AInv_PlayerController::BeginPlay()
@@ -29,7 +32,11 @@ void AInv_PlayerController::BeginPlay()
 	}
 
 	CreateHUDWidget();
+
+	//as long as we add it from BP_ItemComponent (and then add BP_ItemComponent to this PC), we should expect it got a valid one:
+	InventoryComponent = FindComponentByClass<UInv_InventoryComponent>();
 }
+
 void AInv_PlayerController::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
@@ -57,12 +64,31 @@ void AInv_PlayerController::SetupInputComponent()
 
 	//use "ETrigger::Started" will make it trigger ONCE per press, even if we left IA_X::Modifiers=none (default to "special down" trigger per frame if you hold the key) - I explain why in UI course already! Or you could do "::Triggered" && "IA_X::Modifiers=Pressed" to achieve the same goal:
 	EnhancedInputComponent->BindAction(IA_PrimaryInteract, ETriggerEvent::Started, this, &ThisClass::Input_PrimaryInteract);
+	EnhancedInputComponent->BindAction(IA_ToggleInventory, ETriggerEvent::Started, this, &ThisClass::Input_ToggleInventory);
 }
 
-//review: the callback of the IA_X can have any kind of signature: empty, "F__Something" , whaterver -- this is what I learnt in GAS course
 void AInv_PlayerController::Input_PrimaryInteract()
 {
 	DebugHelpers::Print("Primary Interact");
+
+//step1: we must at least check if we're currently looking at any item at all before proceed (otherwise it is kind of lame):
+	if (ThisActor == nullptr) return; //pass this just mean it is an actor blocking "ItemTrace" TraceChannel
+
+	UInv_ItemComponent* ItemComponent = ThisActor->FindComponentByClass<UInv_ItemComponent>();
+	if (IsValid(ItemComponent) == false) return; //pass this mean it is definitely an item (an actor having ItemComp)
+
+//step2: (the check ensure you don't press the key too soon when Inventory isn't assigned yet, who know!)
+	if (InventoryComponent.IsValid())
+	{
+		//InventoryComponent->NoRoomDelegate.Broadcast();
+		InventoryComponent->TryAddItemToPlayerInventory(ItemComponent);
+	}
+}
+
+//review: the callback of the IA_X can have any kind of signature: empty, "F__Something" , whaterver -- this is what I learnt in GAS course
+void AInv_PlayerController::Input_ToggleInventory()
+{
+	if (InventoryComponent.IsValid()) InventoryComponent->ToggleInventory();
 }
 
 void AInv_PlayerController::TraceForItem()
@@ -101,17 +127,50 @@ void AInv_PlayerController::TraceForItem()
 	//this pattern is exact like we do in GAS (just show in different way). Note that the order of th 2nd or 3rd if blocks doesn't matter, because we exclude the "==" case, so that can't be both valid at the same time.
 	if (ThisActor == LastActor) return;
 
-	if (ThisActor.IsValid())
+	if (ThisActor.IsValid() && IsValid(WBP_HUDWidget))
 	{
 		if (UInv_ItemComponent* ItemComponent= ThisActor->FindComponentByClass<UInv_ItemComponent>())
 		{
 			WBP_HUDWidget->ShowPickupMessage(ItemComponent->PickupMessage);
 		}
+
+		/*Which one to use:
+		AActor::FindComponentByInterface(U__Interface::StaticClass()) - overload1,  return UActorComponent*
+		|| AActor::FindComponentByInterface<U__Interface>() - overload2, return I__ deprecated
+		|| AActor::FindComponentByInterface<I__Interface>() - overload3, return I__recommended by DOC
+		 will help to detect if that component ": IInterface"
+
+		+if you need to call BPNativeEvent function in I__Iterface
+		, you must use this I__Iterface::Exc_function(UObject)
+		, hence in this case you want overload1 (if you use overload3 you need to cast back to specific U__Object which is stupid and break the reason why you use interface :D :D or just UObject so that you don't break it)
+
+		+if you simple to call "virtual void" or "BPImplementableEvent"
+		, you surely prefer overload3
+
+		+never use overload2
+		
+		----HERE:
+		you can't do this because it is BPNativeEvent
+		if (IInv_HighlightInterface* IHighlightInterface = ThisActor->FindComponentByInterface<IInv_HighlightInterface>())
+		{
+			IHighlightInterface->Highlight();
+		} */
+		if (UActorComponent* ActorComponent = ThisActor->FindComponentByInterface(UInv_HighlightInterface::StaticClass()); IsValid(ActorComponent))
+		{
+			//call it without extra check because we just "equivalently check it above" via "find" right :D :D
+			IInv_HighlightInterface::Execute_Highlight(ActorComponent);
+		}
 	}
 
 	//this also works somehow (like in GAS), but if you do: "if (!ThisActor.IsValid()) WBP_HUDWidget->HidePickupMessage()" before the "==" if - it also works, the reason is simple. In GAS course we need to call Enemy1,2->highlight/unhighlight - where in this course currently we only use call PC::WBP_HUDWidget::Show/Hide (helper belong to PC::WBP_HUDWidget itself)
-	if (LastActor.IsValid())
+	if (LastActor.IsValid() && IsValid(WBP_HUDWidget))
 	{
 		WBP_HUDWidget->HidePickupMessage();
+
+		if (UActorComponent* ActorComponent = LastActor->FindComponentByInterface(UInv_HighlightInterface::StaticClass()); IsValid(ActorComponent))
+		{
+			//call it without extra check because we just "equivalently check it above" via "find" right :D :D
+			IInv_HighlightInterface::Execute_UnHighlight(ActorComponent);
+		}
 	}
 }
