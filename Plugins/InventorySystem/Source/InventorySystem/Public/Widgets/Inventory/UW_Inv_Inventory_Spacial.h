@@ -6,6 +6,7 @@
 #include "UW_Inv_InventoryBase.h"
 #include "UW_Inv_Inventory_Spacial.generated.h"
 
+class UCanvasPanel;
 class UButton;
 class UUW_Inv_InventoryGrid;
 class UWidgetSwitcher;
@@ -44,6 +45,13 @@ protected:
 		UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
 		TObjectPtr<UUW_Inv_InventoryGrid> InventoryGrid_Craftable;
 
+	//just for the sake of looping through them instead of using switch:
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UUW_Inv_InventoryGrid>> InventoryGridArray;
+	//pretty much optional:
+	UPROPERTY(Transient)
+	TWeakObjectPtr<UUW_Inv_InventoryGrid> ActiveInventoryGrid; //I don't want to increase reference count
+	
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
 	TObjectPtr<UButton> Button_Equippable;
 
@@ -53,9 +61,10 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
 	TObjectPtr<UButton> Button_Craftable;
 
-	//just for the sake of looping through them instead of using switch:
-	UPROPERTY(Transient)
-	TArray<TObjectPtr<UUW_Inv_InventoryGrid>> InventoryGridArray;
-private:
+	//OPTIONAL:
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+	TObjectPtr<UCanvasPanel> CanvasPanel;
 	
+private:
+	void SetActiveInventoryGrid(UUW_Inv_InventoryGrid* GridToBeActive, UButton* ButtonToDisable);
 };

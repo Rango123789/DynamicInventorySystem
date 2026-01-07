@@ -1,17 +1,17 @@
 // Fill out your copyright notice in the Description page of Project Settings.
-
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "UW_Inv_InventoryGridSlot.generated.h"
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FGridSlotMouseEvent, const int32&, AffectedGridSlot, const FPointerEvent&, PointerEvent );
 class UItemData;
 
 UENUM(BlueprintType)
 enum class ESlotState : uint8
 {
-	UOccupied,
+	Unoccupied,
 	Occupied,
 	Selected,
 	GrayedOut
@@ -29,12 +29,20 @@ public:
 	//I use this single function to set the brush for Image_GridSlot::Brush
 	void SetSlotStateAndBrush(ESlotState InSlotState) const;
 
+//delegates
+	UPROPERTY(BlueprintAssignable)
+	FGridSlotMouseEvent OnGridSlotHovered;
+	UPROPERTY(BlueprintAssignable)
+	FGridSlotMouseEvent OnGridSlotUnhovered;
+	UPROPERTY(BlueprintAssignable)
+	FGridSlotMouseEvent OnGridSlotClicked;
+	
 //all of these are to be assigned, hence need UPROPERTY(__) so far:
 	//this one will go hand in hand with its brush
 	ESlotState SlotState;
 
 	/*This one is optional, you can also rely on SlotState*/
-	bool bAvailable = true;
+	bool bAvailable = true; //this is very important, stephen forget this but I didn't
 	
 	//its index is assigned from WBP_InventoryGrid::GridSlots on creation), so don't set it again in AddItemWidgetsToIndices
 	int32 GridSlotIndex;
@@ -55,6 +63,10 @@ public:
 	TWeakObjectPtr<UItemData> OwningItemData;
 	
 protected:
+	virtual void NativeOnMouseEnter(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual void NativeOnMouseLeave(const FPointerEvent& InMouseEvent) override;
+	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UImage> Image_GridSlot;
 

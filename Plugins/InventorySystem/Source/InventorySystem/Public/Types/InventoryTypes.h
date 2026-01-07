@@ -62,3 +62,63 @@ struct FInventoryAvailabilityInfo
 	//apparently this is for convenient, not mean "UItemData" already in WBP_Grid or not (it is the SlotInfo::bItemAtIndex that tells it instead I guess), but anyway let's see
 	TWeakObjectPtr<UItemData> ItemData;
 };
+
+//can name it ESlotQuadrant
+UENUM(BlueprintType)
+enum class ETileQuadrant : uint8
+{
+	TopLeft,      //NW
+	TopRight,    //NE
+	BottomLeft,  //SW
+	BottomRight  //SE
+};
+
+//can name it FSlotParameters
+USTRUCT(BlueprintType)
+struct FTileParameters
+{
+	GENERATED_BODY()
+
+	//the current SlotIndex you hover on while wearing WBP_HoverItem
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+	int32 HoveredIndex{INDEX_NONE};
+
+	//its Position{XSlot * YSlot} to the top-left Canvas
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+	FIntPoint HoveredNormalizedPosition; //rename from "Coordinates", DO NOT name it GridDimensions lol
+
+	//which part of HoveredGridSlot the mouse is on
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory")
+	ETileQuadrant TileQuadrant;
+};
+
+/*when you define a FREE "bool operator==" (outside of the type)
+, they typically make it "inline"
+, because it typically is "short function" or else?*/
+inline bool operator==(const FTileParameters& A, const FTileParameters& B)
+{
+	return A.HoveredIndex == B.HoveredIndex &&
+		   A.HoveredNormalizedPosition == B.HoveredNormalizedPosition &&
+		   A.TileQuadrant == B.TileQuadrant;
+};
+
+USTRUCT(BlueprintType)
+struct FSpaceQueryResult
+{
+	GENERATED_BODY()
+
+	//true if the space queried has no items in it
+	bool bHasSpace{false};
+
+	//valid if there is a single item in the space that we can swap with (if this is true then bHasSpace wil be naturally false)
+	TWeakObjectPtr<UItemData> PreoccupiedItemData{nullptr};
+
+	//the Top Left Index of the PreoccupiedItemData if there is one (not when 0 nor 2+)
+	int32 TopLeftSlotIndexOfPreoccupiedItem = INDEX_NONE;
+};
+
+
+
+
+
+

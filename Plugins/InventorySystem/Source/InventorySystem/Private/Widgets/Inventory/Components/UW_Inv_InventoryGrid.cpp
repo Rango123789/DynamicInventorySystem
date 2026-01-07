@@ -1,8 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 #include "Widgets/Inventory/Components/UW_Inv_InventoryGrid.h"
-
 #include "InventorySystem.h"
 #include "ActorComponent/Inv_InventoryComponent.h"
+#include "Blueprint/SlateBlueprintLibrary.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "InventoryTags/InventoryTags.h"
@@ -11,6 +12,8 @@
 #include "Widgets/Inventory/Components/UW_Inv_InventoryGridSlot.h"
 #include "Widgets/Inventory/Components/UW_Inv_SlottedItem.h"
 #include "Items/ItemManifest.h"
+#include "Widgets/Inventory/Components/HoverItem/UW_Inv_HoverItem.h"
+#include "Widgets/ItemPopup/UW_Inv_ItemPopup.h"
 
 void UUW_Inv_InventoryGrid::NativeOnInitialized()
 {
@@ -28,40 +31,488 @@ void UUW_Inv_InventoryGrid::NativeOnInitialized()
 	}		
 }
 
-/* What to know:
-(1) row and column to 1DIndex
-1DIndex/GridSlotIndex = i * columns + j //provided that rows(i) is outer loop, column(j) is inner loop
-
-(2) 1DIndex to Row and column:
-RowIndex    = i = GridSlotIndex / columns; //floor is no need, it will be truncated anyway
-ColumnIndex = j = GridSlotIndex % columns; 
- */
-void UUW_Inv_InventoryGrid::ConstructGridSlots()
+void UUW_Inv_InventoryGrid::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
-	//good practice: if you're to know how exactly many elements you're to add for your array then just do ".Preserve(n)" for the better performance:
-	GridSlots.Reserve(rows * columns);
+	Super::NativeTick(MyGeometry, InDeltaTime);
 	
-	for (int32 i = 0 ; i < rows; i++)
+	/*UPDATE1: because even when HoverItem is NOT valid, we may still want to highlight the single hovered GridSlot, so we must still let it through - hence remove "if (IsValid(WBP_HoverItem))"
+	 *UPDATE2: if mouse just exit canvas - we do unhighlight ONCE - only happen for one frame, but then next frame it will no longer be true*/
+		//these are both in local space (origin = Viewport top-left), hence DesiredSize/Geometry::GetLocalSize() is appropriate
+	FVector2D  CanvasPositionInViewport=  GetWidgetPositionInViewport(CanvasPanel_GridSlots);
+	FVector2D  MousePositionInViewPort = UWidgetLayoutLibrary::GetMousePositionOnViewport(this);
+
+		//only true for single frame, and the next frame it will continue to update TileParams
+	if (MouseExitedCanvas(CanvasPositionInViewport, MousePositionInViewPort)) //this also UpdateMouseInCanvasBooleans
 	{
-		for (int32 j = 0 ; j < columns; j++)
+		/*UnhighlightSlot() -- You can do this in MouseExitedCanvas itself. But I like to do it here for the sake of overview.
+		 *Stephen do it inside MouseExitedCanvas itself, but I do it here*/
+		UnHighlightSlots(LastHighlightedIndex, LastHighlightedGridDimensions);
+
+		return; 
+	}
+
+	if (bMouseInCanvas)
+	{
+		UpdateTileParameters(CanvasPositionInViewport, MousePositionInViewPort);
+
+		if (IsValid(WBP_HoverItem))
 		{
-			//construct WBP_GridSlot: (review: if it is not UUW+, then use NewObject<UWidget> and then .AddChild() )
-			UUW_Inv_InventoryGridSlot* GridSlot = CreateWidget<UUW_Inv_InventoryGridSlot>(this, GridSlot_Class);
-			GridSlot->GridSlotIndex = i * columns + j;
+			UpdateSpaceQueryResult();
+			/* HighlightSlot() if QueryResult.bHasSpace = true, UnhighlightSlot() if QueryResult.bHasSpace = false (this helps to guarantee that at the time the DropIndex get out of bounds (invalid DropIndex is stored currently) where Mouse is still in canvas we Unhighlight it immediately, even before Mouse is out of canvas - and when the mouse is out of canvas we stop updating everything - which is perfect!)
+			 * FUNNY: this could make the Unhighlight() above REDUNDANT lol? hell no, we're to implement "highlight a single hovered empty GridSlot" even if WBP_HoverItem is NOT valid, hence it is still needed :D :D
+			 * Stephen do it inside UpdateSpaceQueryResult itself, but I do it here
+			 */
+			if (SpaceQueryResult.bHasSpace)
+			{
+				//if it gets here, DropIndex must be valid. WBP_HoverItem just valid right outside!
+				HighlightSlots(DropIndex, WBP_HoverItem->GridDimensions);			
+			} else
+			{
+				/*using DropIndex is is a mistake, DropIndex in the case "SpaceQueryResult.bHasSpace=false" could be "-1, -2 ..." that is the whole reason we cache LastHighlightedIndex right inside HighlightSlots (that is indeed "the last valid DropIndex" :D :D)
+				//this not only unhighlight the last valid drop ones, but also re-set "fake one" (TopLeftPreoccupiedIndex will be the fake one and it will help to reset it from  "GrayedOut" back to "occupied")*/
+				UnHighlightSlots(LastHighlightedIndex, LastHighlightedGridDimensions);
+			}
 
-			//add it to WBP_InventoryGrid::Canvas (if you don't use AddChild[ToContainer] version, you must then use UWidgetLayoutLibrary::GetSlotAsXSlot(InChildOfXContainer) to get back that slot )
-			UCanvasPanelSlot* CanvasPanelSlot = CanvasPanel_GridSlots->AddChildToCanvas(GridSlot);
-
-			//set its size and position within canvas: there is no need of FIntPoint SlotPosition(j, i) and then "x SlotSize" at all
-			CanvasPanelSlot->SetSize(FVector2D(GridSlotSize, GridSlotSize)); //it also has constructor accept "a" -->"a,a"
-
-			//it must be "X ~ which column/j" and "Y ~ which row/i" so don't do it by habit lol
-			CanvasPanelSlot->SetPosition(FVector2D( j * GridSlotSize, i * GridSlotSize ));
-			
-			//add it to GridSlots array as well:
-			GridSlots.Add(GridSlot);
+			/*set GrayedOut Brush for PreoccupiedItemData if valid:
+			//TRICK: because we don't highlight when bHasSpace=false as preoccupied item in the way(even if DropIndex is still valid and not negative) and we want to grey out the preoccupied grid, so we use the trick: "we fake TopLeftPreoccupiedIndex = LastValidDropIndex" so that it will naturally help to re-set it back to "occupied" from "grayed out" without needing to create extra LastGrayOutPreoccupiedIndex at all!*/
+			if (SpaceQueryResult.PreoccupiedItemData.IsValid() &&
+				GridSlots.IsValidIndex(SpaceQueryResult.TopLeftSlotIndexOfPreoccupiedItem))
+			{
+			//funny stephen does these fake assignments inside SetSlotStateForAllSlotsInGridSize itself, wherever lol
+				//we fake (it naturally help reset to occupied if we move mouse away from the preoccupied item).
+				LastHighlightedIndex =	SpaceQueryResult.TopLeftSlotIndexOfPreoccupiedItem;
+				//Warning: this time it must be PreoccupiedItemData:::GridDimensions , not WBP_HoverItem:::GridDimensions
+				LastHighlightedGridDimensions = SpaceQueryResult.PreoccupiedItemData->GetGridDimensions();
+				//Warning: we try to change PreoccupiedGrid, not WBP_HoverItem (not even highlight anything in this case)
+				SetSlotStateForAllSlotsInGridSize(LastHighlightedIndex, LastHighlightedGridDimensions, ESlotState::GrayedOut);
+			}
 		}
-	}	
+	}
+	
+}
+
+void UUW_Inv_InventoryGrid::HighlightSlots(int32 StartIndex, const FIntPoint& InGridDimensions)
+{
+//step0: REDUNDANT at least for now (you never get upto this function if it is false at first place)
+	if (bMouseInCanvas == false) return; 
+
+//step1: we must unhighlight the LastHighlightedIndex->GridSize (the last valid DropIndex, that could be just next to the newest valid one as you move Mouse to new spot) before Highlight the new DropIndex->GridSize = this is key to my puzzle at first place: "do we need to change slot states along as we move the WBP_HoverItem long?"  --- hell yeah! what a smart trick:
+	UnHighlightSlots(LastHighlightedIndex, LastHighlightedGridDimensions);
+	
+//step2: highlight it all (could be redundant on the preoccupied slots, but who cares lol)
+	UInv_BPFunctionLibrary::ForEach2D<UUW_Inv_InventoryGridSlot*>(GridSlots, StartIndex, InGridDimensions, columns,
+	[&](UUW_Inv_InventoryGridSlot* SubGridSlot)
+	{
+		SubGridSlot->SetSlotStateAndBrush(ESlotState::Occupied);
+	});
+	
+//step3: at the moment you highlight DropIndex->GridSize, you want to cache it (so that you know what to unhighlight later), so unlike what I expected, we don't need to store a separate HoveredHighlightedGridSlots, we need to know where it start and GrisSize only = so basically equivalent! yeah. That's why we do have WBP_SlottedItem --> WBP_HoverItem::SlotDimensions at first place
+	LastHighlightedIndex = StartIndex;
+	LastHighlightedGridDimensions = InGridDimensions;
+}
+
+//we don't unhighlight the preoccupied slots (bAvailable=false or OwningItemData.IsValid=true)
+void UUW_Inv_InventoryGrid::UnHighlightSlots(int StartIndex, const FIntPoint& InGridDimensions)
+{
+	UInv_BPFunctionLibrary::ForEach2D<UUW_Inv_InventoryGridSlot*>(GridSlots, StartIndex, InGridDimensions, columns,
+		[&](UUW_Inv_InventoryGridSlot* SubGridSlot)
+		{
+			if (SubGridSlot->bAvailable) //or OwningItemDataIsValid = false
+			{
+				SubGridSlot->SetSlotStateAndBrush(ESlotState::Unoccupied);
+			}
+			//this could be redundant, it should be "highlighted" at first place?
+			//UPDATE: well we use it to to re-set "GrayedOutPreoccupiedGrid"
+			else 
+			{
+				SubGridSlot->SetSlotStateAndBrush(ESlotState::Occupied); 
+			}
+		}
+	);
+}
+
+void UUW_Inv_InventoryGrid::SetSlotStateForAllSlotsInGridSize(const int32& StartIndex,
+	const FIntPoint& InGridDimensions, const ESlotState& InSlotState)
+{
+	UInv_BPFunctionLibrary::ForEach2D<UUW_Inv_InventoryGridSlot*>(GridSlots, StartIndex, InGridDimensions, columns,
+		[&](UUW_Inv_InventoryGridSlot* SubGridSlot)
+		{
+			SubGridSlot->SetSlotStateAndBrush(InSlotState);
+		}
+	);
+}
+
+UUserWidget* UUW_Inv_InventoryGrid::GetVisibleCursorWidget()
+{
+	//stephen decide this:
+	if (IsValid(GetOwningPlayer()) == false) return nullptr;
+	
+	if (IsValid(WBP_Cursor_Visible) == false)
+	{
+		WBP_Cursor_Visible = CreateWidget<UUserWidget>(GetOwningPlayer(), Cursor_Visible_Class);
+	}
+
+	return WBP_Cursor_Visible;
+}
+
+UUserWidget* UUW_Inv_InventoryGrid::GetHiddenCursorWidget()
+{
+	//stephen decide this:
+	if (IsValid(GetOwningPlayer()) == false) return nullptr;
+	
+	if (IsValid(WBP_Cursor_Hidden) == false)
+	{
+		WBP_Cursor_Hidden = CreateWidget<UUserWidget>(GetOwningPlayer(), Cursor_Hidden_Class);
+	}
+
+	return WBP_Cursor_Hidden;
+}
+
+void UUW_Inv_InventoryGrid::ShowVisibleCursorWidget()
+{
+	if (IsValid(GetOwningPlayer()) == false) return;
+	GetOwningPlayer()->SetMouseCursorWidget(EMouseCursor::Type::Default, GetVisibleCursorWidget()); 
+}
+
+void UUW_Inv_InventoryGrid::ShowHiddenCursorWidget()
+{
+	if (IsValid(GetOwningPlayer()) == false) return;
+	GetOwningPlayer()->SetMouseCursorWidget(EMouseCursor::Type::Default, GetHiddenCursorWidget()); 
+}
+
+//this is different from "Is[GridSize]WithinBounds", this check the MousePosition against CanvasSize 
+bool UUW_Inv_InventoryGrid::MouseExitedCanvas(const FVector2D& CanvasPositionInViewport,
+	const FVector2D& MousePositionInViewPort)
+{
+//step1: update bMouseInCanvas and bLastMouseInCanvas (can factorize into: UpdateMouseInCanvasBooleans). Note what the MouseExitedCanvas won't return a correct result if we didn't do UpdateMouseInCanvasBooleans yet for this frame, hence I device to directly do it HERE in the right order with the hosting function.
+	//cache before change
+	bLastMouseInCanvas = bMouseInCanvas;
+
+	//change
+		//you can directly create IsMouseWithinCanvas if you want, but anyway it could be a GENERIC re-usable function
+		//CanvasPanel_GridSlots->GetDesiredSize() will also work because current there is no parent constraints on Canvas (but risky anyway)
+	FVector2D CanvasSize = CanvasPanel_GridSlots->GetCachedGeometry().GetLocalSize(); 
+	bMouseInCanvas = UInv_BPFunctionLibrary::IsLocationWithinWidgetSize(CanvasPositionInViewport,MousePositionInViewPort, CanvasSize);
+
+//step2: decide the result
+	if (bMouseInCanvas == false && bLastMouseInCanvas == true)
+	{
+		return true; //mouse just exit canvas
+	}
+	
+	return false;
+}
+
+void UUW_Inv_InventoryGrid::UpdateTileParameters(const FVector2D& CanvasPositionInViewPort,
+	const FVector2D& MousePositionInViewPort)
+{
+//if mouse not on canvas return: this is different from MouseExitedCanvas ( !bInIsCanvas && bLastIsInCanvas) = but at least you should set TileParameters to "FTileParams{}" and SpaceQueryResult to "FSpaceQueryResult{}" right? - well we can do it in MouseExitedCanvas() as well
+	
+//last frame = this frame first thing:
+	LastTileParameters = TileParameters;
+
+	//Calculate HoveredNormalizedPosition (Coordinates with Unit=GridSize):
+	TileParameters.HoveredNormalizedPosition =  CalculateNormalizedPositionOfHoveredGridSlot(CanvasPositionInViewPort, MousePositionInViewPort);
+	TileParameters.HoveredIndex = UInv_BPFunctionLibrary::GetArrayIndexFromNormalizedPosition(TileParameters.HoveredNormalizedPosition, columns);
+	TileParameters.TileQuadrant = CalculateTileQuadrant(CanvasPositionInViewPort, MousePositionInViewPort);
+	
+	//Handle SlotStates of pertinent GridSlots: --UPDATE: I move it to GLOBAL place for readability and organization
+		//UpdateSpaceQueryResult();
+}
+
+//you may want to name it "OnTileParametersUpdate" if you want to, because it is literally called after TileParameters update
+void UUW_Inv_InventoryGrid::UpdateSpaceQueryResult()
+{
+//step0: [UPDATE] when only stop it when we need to use WBP_HoverItem, not global skip any more
+	if (IsValid(WBP_HoverItem) == false) return;
+	
+//step1: Get HoverItem GridSize
+	FIntPoint GridDimensions = WBP_HoverItem->GridDimensions; //make sure to check it outside at least
+	
+//step2: Calculating the starting GridSlot for highlighting (not necessarily match the HoveredGridSlot at all, but depending on which exactly of 4 parts the mouse is on - that's the whole reason we have FTileParameters::ETileQuadrant) = I think it will be easy lol?
+	//i reckon that they can be INVALID (return and get "negative" Index/Position lol). So my suggestion is to check the DropIndex before use it
+	FIntPoint  DropNormalizedPosition = CalculateDropNormalizedPosition(GridDimensions);
+
+	/*this is up to you, you may want to check if it is valid index. and then decide if it is NOT valid you will either:
+	(1) don't assign it at all, hence it keeps the last valid DropIndex
+	(2) assign it to that invalid DropIndex, and we have no way to what is the the last valid DropIndex when the mouse is still on canvas, but the starting DropIndex is already out of bounds = stephen current does this way 
+	*/
+	DropIndex = UInv_BPFunctionLibrary::GetArrayIndexFromNormalizedPosition(DropNormalizedPosition, columns);
+
+//step3: checking hover position (I guess starting from the starting GridSlot for highlighting, not necessarily the HoveredGridSlot ) - could be very similar to what we did, however it has some differences
+	SpaceQueryResult = GetSpaceQueryResult(DropIndex, GridDimensions);
+}
+
+FSpaceQueryResult UUW_Inv_InventoryGrid::GetSpaceQueryResult(int32 InDropIndex, FIntPoint& GridDimensions)
+{
+/*Take a look at IsThisSubGridSlotQualified chain as a reference, and you see that you can re-use many the same functions:
+	//1. SubIndex claimed?
+	= this is irrelevant here, because we only need to check on a single DropGridSlot/DropIndex here!
+	
+	//2. Has valid item?
+	= OKAY!
+
+	//3. Does the current GridSlot is the UpperLeftSlot of this SubGridSlot
+	= irrelevant because we move the EXISTING one, not place a to-be-in one (not offically exist at the moment yet)
+
+	//4. Is this a stackable item?
+
+	//5. Is this preoccupied item the same type as the item we're trying to add?
+
+	//6. Is this slot at the max stack size already?
+ */
+	FSpaceQueryResult QueryResult{}; //make sure its default value is appropriate
+	
+	if (GridSlots.IsValidIndex(InDropIndex) == false) return QueryResult; //UPDATE: very important!
+	
+	UUW_Inv_InventoryGridSlot* DropGridSlot = GridSlots[InDropIndex];
+	
+//1. Is in the Grid bounds?
+	if (IsOutOfBounds(DropGridSlot, GridDimensions)) return QueryResult;
+
+/*You can merge 2. and 3. like Stephen if you want (because both need ForEach2D), but anyway I like to separate them for readability:
+	Result.bHasSpace = true;
+	
+	// If more than one of the indices is occupied with the same item, we need to see if they all have the same upper left index.
+	TSet<int32> OccupiedUpperLeftIndices;
+	UInv_InventoryStatics::ForEach2D(GridSlots, UInv_WidgetUtils::GetIndexFromPosition(Position, Columns), Dimensions, Columns, [&](const UInv_GridSlot* GridSlot)
+	{
+		if (GridSlot->GetInventoryItem().IsValid())
+		{
+			OccupiedUpperLeftIndices.Add(GridSlot->GetUpperLeftIndex());
+			Result.bHasSpace = false;
+		}
+	});
+
+	// any items in the way?
+	// if so, is there only one item in the way? (can we swap?)
+	if (OccupiedUpperLeftIndices.Num() == 1) // single item at position - it's valid for swapping/combining
+	{
+		const int32 Index = *OccupiedUpperLeftIndices.CreateConstIterator();
+		Result.ValidItem = GridSlots[Index]->GetInventoryItem();
+		Result.UpperLeftIndex = GridSlots[Index]->GetUpperLeftIndex();
+	}
+
+	return Result;
+*/
+//2. Is any item in the way? if no, set QueryResult.bHasSpace = true and return (we must use ForEach2D but this time we use IsGridSlotPreoccupied instead IsThisSubGridSlotQualified at GLOBAL level)
+	if (HasRoomForGridSizeAtThisSlot(GridDimensions, DropGridSlot))
+	{
+		QueryResult.bHasSpace = true;
+		return QueryResult;
+	}
+
+	//if any item in the way, set ::bHasSpace to false and continue (NOT return)
+	QueryResult.bHasSpace = false; //no need the default value is false already lol, but I just make it clear
+	
+//3. if yes, is there only one item in the way (I.E one or more grid slots with the same UpperLeftIndex)? (can we swap or combine?)
+	TSet<int32> TopLeftIndicesOfPreoccupiedItems; //it could be "1" or more ("0" is included after 2. already)
+	UInv_BPFunctionLibrary::ForEach2D<UUW_Inv_InventoryGridSlot*>( GridSlots,
+		DropGridSlot->GridSlotIndex, GridDimensions, columns,
+		[&](UUW_Inv_InventoryGridSlot* SubGridSlot)
+		{
+			if (IsGridSlotPreoccupied(SubGridSlot))
+			{
+				TopLeftIndicesOfPreoccupiedItems.Add(SubGridSlot->UpperLeftIndex); //NOT "SubGridSlot->GridSlotIndex"
+			}
+		}
+	);
+
+	//if this TSet (that only accept unique values) contain a single element, then it meets our requirement: "only one ItemData type in the way and we consider for swapping"
+	if (TopLeftIndicesOfPreoccupiedItems.Num() == 1)
+	{
+		int32 TopLeftPreoccupiedIndex = *TopLeftIndicesOfPreoccupiedItems.begin();
+		
+		QueryResult.bHasSpace = false; //no need we just did it, I just want to make it clear
+		QueryResult.TopLeftSlotIndexOfPreoccupiedItem = TopLeftPreoccupiedIndex; // or * __ .CreateConstIterator()
+		QueryResult.PreoccupiedItemData = GridSlots[TopLeftPreoccupiedIndex]->OwningItemData.Get();
+		return QueryResult;
+	}
+	//if this TSet contain 2+ element (because the case 0 is excluded), we don't care simply return "QueryResult::bHasSpace = false, Preoccupied=nullptr, TopLeftIndex=INDEX_NONE" ()basically the default QueryResult lol 
+	else
+	{
+		QueryResult.bHasSpace = false; //no need we just did it, I just want to make it clear
+		return QueryResult;
+	}
+	
+//4. is the stackable one and of the same type? (can we merge?) = Stephen didn't consider this case currently lol
+//UPDATE: stephen didn't decide it is "swapping or combining" here (meaning he didn't create an extra bool to tell it). It will be decided externally (simply because we did NOT pass in DraggingItemData here, we have nothing to compare) 
+	
+}
+
+FIntPoint UUW_Inv_InventoryGrid::CalculateDropNormalizedPosition(const FIntPoint& GridDimensions)
+{
+/*
+	which GridSlot is hovered on? = Params.Index 
+	which part of it is hovered on? = Params.TileQuadrant
+---WRONG:---
+	if top-left it is the starting is HoveredGridSlot itself
+	if top-right then it must be HoverGridSlot::Index + 1
+	if bottom-left then  HoverGridSlot::Index + columns
+	if bottom-right then HoverGridSlot::Index + columns + 1
+	so I don't see any difficulty here lol?
+	well it is NOT correct lol, we must consider the case GridSize is 2*3, 3*2, 3*3 and more lol
+	hence the result must involve "GridSize" as well (HENCE calculate in step1 lol)
+
+---BETTER DRAW A PICTURE TO SEE!---
+	STUPID APPROACH: use ArrayIndex as the base
+	SMART APPROACH: use RowIndex and ColumnIndex as the base (and convert it to ArrayIndex in the end or next step)
+	I believe I can figure it out my, it is not something technical, it is just a normal challenge :D :D
+	GridSize.X and GridSize.Y % 2 = 1 or 0 also affect the result as well I guess? = this is true, Stephen will consider this lol
+	all we need is to the STARTING one
+
+---PERFECT code:
+	The code below is the perfect after all the years.
+	You can in fact check one by one case yourself, but why re-inventing  the wheel  (you must have 4 big cases: old-old, old-even, even-old, even-even , and in each each cases you handle it separately - you will succeed trust me - it just takes time)
+	So just see the picture I draw and then follow it.
+*/
+
+//step0: ready stuff
+	FIntPoint StartingPosition{-1,-1}; //in case it goes know we know.
+	
+	int32 HoveredIndex  = TileParameters.HoveredIndex; //not used, as I said above we follow the "SMART" approach
+	int32 HoveredColumn = TileParameters.HoveredNormalizedPosition.X;
+	int32 HoveredRow    = TileParameters.HoveredNormalizedPosition.Y;
+	
+//step1:
+	int32 HasEvenWidth = GridDimensions.X % 2 == 0  ? 1 : 0;    // = GridDimensions.X % 2 directly is in correct, it reverses the wanted result
+	int32 HasEvenHeight = GridDimensions.Y % 2 == 0 ? 1 : 0;;  // unless you change the name into HasOddWidth lol
+
+//step2: the FOUR BIG CASES: (you can use switch, but I like to separate them by if for readability) -- unlike my idea, BIG cases separated by odd-odd, odd-even, even-odd, even-even. Here Stephen separate by which part of the HoveredSlot we're exactly on. Both ways come to Paris lol:
+	//there is no rule lol, see the PICTURE and figure it out lol:
+	if (TileParameters.TileQuadrant == ETileQuadrant::TopLeft)
+	{
+		/*update we can't not use FMath::FloorToInt32 with "GridDimensions.X / 2.f" here 
+		StartingPosition.X = HoveredColumn - FMath::FloorToInt32<float>(GridDimensions.X / 2);
+		StartingPosition.Y = HoveredRow - FMath::FloorToInt32<float>(GridDimensions.Y / 2);*/
+		StartingPosition.X = HoveredColumn - (int32)(GridDimensions.X / 2); //even if you don't put (int32) it will auto-convert and floor down
+		StartingPosition.Y = HoveredRow - (GridDimensions.Y / 2);
+	}
+
+	//there is no rule lol, see the PICTURE and figure it out lol:
+	if (TileParameters.TileQuadrant == ETileQuadrant::TopRight)
+	{
+		StartingPosition.X = HoveredColumn - (GridDimensions.X / 2) + HasEvenWidth;
+		StartingPosition.Y = HoveredRow    - (GridDimensions.Y / 2);
+	}
+
+	//there is no rule lol, see the PICTURE and figure it out lol:
+	if (TileParameters.TileQuadrant == ETileQuadrant::BottomLeft)
+	{
+		StartingPosition.X = HoveredColumn - (GridDimensions.X / 2);
+		StartingPosition.Y = HoveredRow    - (GridDimensions.Y / 2) + HasEvenHeight;
+	}
+
+	//there is no rule lol, see the PICTURE and figure it out lol:
+	if (TileParameters.TileQuadrant == ETileQuadrant::BottomRight)
+	{
+		StartingPosition.X = HoveredColumn - (GridDimensions.X / 2) + HasEvenWidth;
+		StartingPosition.Y = HoveredRow    - (GridDimensions.Y / 2) + HasEvenHeight;
+	}
+
+	return StartingPosition;
+}
+
+ETileQuadrant UUW_Inv_InventoryGrid::CalculateTileQuadrant(const FVector2D& CanvasPositionInViewPort,
+                                                           const FVector2D& MousePositionInViewPort)
+{
+/* it is very easy, very similar to ColumnIndex = ArrayIndex % columns
+ * we simply compare "the remainder in float" with "TileSize" (in both direction)
+ * and we will know whether the mouse is in top-left, top-right, bottom-left or bottom-right exactly! yeah
+ * so the question is: is where any helper that help use to get "the remainder in float" of "A float/B float"? (again unlike remainder in int32 we use A % B and done) = luckily we have! hell yeah!
+ * FMod HERE = "Floating-point" modulus! (not "mod" in mathematics back in high school lol)
+ */
+	int32 DeltaX = MousePositionInViewPort.X - CanvasPositionInViewPort.X;
+	int32 DeltaY = MousePositionInViewPort.Y - CanvasPositionInViewPort.Y;
+
+	float RemainderX = FMath::Fmod(DeltaX, GridSlotSize);
+	float RemainderY = FMath::Fmod(DeltaY, GridSlotSize);
+
+
+	//this clearly better code:
+	bool bIsTop = RemainderY <= GridSlotSize / 2.0f;
+	bool bIsLeft = RemainderX <= GridSlotSize / 2.0f;
+
+	if (bIsTop && bIsLeft) return ETileQuadrant::TopLeft;
+	if (bIsTop && !bIsLeft) return ETileQuadrant::TopRight;
+	if (!bIsTop && bIsLeft) return ETileQuadrant::BottomLeft;
+	if (!bIsTop && !bIsLeft) return ETileQuadrant::BottomRight;
+	
+	/*Rider auto-complete lol: (which one is "=" is upto you, but shouldn't be both)
+	bool bIsTopLeft = (RemainderX <= GridSlotSize / 2.0f) && (RemainderY <= GridSlotSize / 2.0f);
+	bool bIsTopRight = (RemainderX > GridSlotSize / 2.0f) && (RemainderY <= GridSlotSize / 2.0f);
+	bool bIsBottomLeft = (RemainderX <= GridSlotSize / 2.0f) && (RemainderY > GridSlotSize / 2.0f);
+	bool bIsBottomRight = (RemainderX > GridSlotSize / 2.0f) && (RemainderY > GridSlotSize / 2.0f);
+
+	if (bIsTopLeft) return ETileQuadrant::TopLeft;
+	if (bIsTopRight) return ETileQuadrant::TopRight;
+	if (bIsBottomLeft) return ETileQuadrant::BottomLeft;
+	if (bIsBottomRight) return ETileQuadrant::BottomRight;
+	*/
+	
+	return ETileQuadrant();
+}
+
+FIntPoint UUW_Inv_InventoryGrid::CalculateNormalizedPositionOfHoveredGridSlot(const FVector2D& CanvasPositionInViewPort,
+	const FVector2D& MousePositionInViewPort)
+{
+/*They're current in local space (where TileSize (if not constrained) and Geometry.GetLocalSize() is appropriate to be used) with origin is viewport top-left
+ *But you know what, the origin doesn't really matter at all if we compare 2 points as long as they're relative to the same origin (where doesn't matter) but in the same unit space (which they're)
+ */
+	int32 DeltaX = MousePositionInViewPort.X - CanvasPositionInViewPort.X;
+	int32 DeltaY = MousePositionInViewPort.Y - CanvasPositionInViewPort.Y;
+
+	//OPTION1: it will be auto-converted and rounded down
+		//return FIntPoint( DeltaX / GridSlotSize , DeltaY / GridSlotSize);
+	//OPTION2: (DO NOT use "RoundToInt" - also to int32 but not 5-5. not floor)
+
+	if ( GridSlots.IsValidIndex(0))
+	{
+		float LocalSizeX = GridSlots[0]->GetCachedGeometry().GetLocalSize().X;
+		float LocalSizeY = GridSlots[0]->GetCachedGeometry().GetLocalSize().Y;
+		return FIntPoint(
+			FMath::FloorToInt32(DeltaX /  LocalSizeX),
+			FMath::FloorToInt32(DeltaY / LocalSizeY)
+		);
+	}
+//this time use FloorToInt32 is safe here
+	return FIntPoint(
+				FMath::FloorToInt32(DeltaX / GridSlotSize),
+				FMath::FloorToInt32(DeltaY / GridSlotSize)
+			);
+}
+
+FVector2D UUW_Inv_InventoryGrid::GetWidgetPositionInViewport(UWidget* InWidget)
+{
+	/* testing
+	FGeometry WidgetGeometry = InWidget->GetCachedGeometry();
+	FVector2D LocalTopLeftPosition = USlateBlueprintLibrary::GetLocalTopLeft(WidgetGeometry);
+	DebugHelpers::Print(FString("LocalTopLeftPosition: ") + LocalTopLeftPosition.ToString()); //same result as "WidgetGeometry.Position"
+
+	FVector2D PixelPosition;
+	FVector2D ViewportPosition;
+	USlateBlueprintLibrary::LocalToViewport(this, WidgetGeometry, LocalTopLeftPosition, PixelPosition, ViewportPosition);
+
+	DebugHelpers::Print(FString("GetAbsolutePosition(): ") + WidgetGeometry.GetAbsolutePosition().ToString()); //the actual draw&render size (hence smaller)
+	DebugHelpers::Print(FString("GetLocalPosition(): ") + WidgetGeometry.Position.ToString());  //before DPI relative it its direct parent
+	DebugHelpers::Print(FString("PixelPosition: ") + PixelPosition.ToString());                 
+	DebugHelpers::Print(FString("ViewportPosition: ") + ViewportPosition.ToString());           //bigger like DesiredSize before DPI, just like in local space but move the origin to Viewport top-left, instead of direct-parent top-left
+	
+	if (GridSlots.IsValidIndex(0))
+	{
+		FGeometry SlotGeometry = GridSlots[0]->GetCachedGeometry();
+		DebugHelpers::Print(FString("LocalSize: ") + SlotGeometry.GetLocalSize().ToString()); // smaller
+		DebugHelpers::Print(FString("AbsoluteSize: ") + SlotGeometry.GetAbsoluteSize().ToString()); //65-65
+	}
+	*/
+	FGeometry WidgetGeometry = InWidget->GetCachedGeometry();
+	FVector2D LocalTopLeftPosition = USlateBlueprintLibrary::GetLocalTopLeft(WidgetGeometry); //or WidgetGeometry.Position (they're the same I test it)
+
+	FVector2D PixelPosition;
+	FVector2D ViewportPosition; //you can name it "local viewport position" (because it is in fact in "local space" with parent = Viewport)
+	USlateBlueprintLibrary::LocalToViewport(this, WidgetGeometry, LocalTopLeftPosition, PixelPosition, ViewportPosition);
+	
+	return ViewportPosition;
 }
 
 bool UUW_Inv_InventoryGrid::DoesItemMatchGridCategory(UItemData* ItemData)
@@ -227,7 +678,6 @@ bool UUW_Inv_InventoryGrid::HasRoomForGridSizeAtThisSlot(UUW_Inv_InventoryGridSl
 	return bHasRoomForGridSizeAtThisSlot;
 }
 
-
 bool UUW_Inv_InventoryGrid::IsThisSubGridSlotQualified(UUW_Inv_InventoryGridSlot* GridSlot,
 	UUW_Inv_InventoryGridSlot* SubGridSlot, TSet<int32>& ClaimedSlotIndices, TSet<int32>& PotentialClaimedIndices,
 	const FItemManifest& ItemManifest, int32 MaxStackSize)
@@ -243,7 +693,7 @@ bool UUW_Inv_InventoryGrid::IsThisSubGridSlotQualified(UUW_Inv_InventoryGridSlot
 		return true;
 	}
 						
-	/*3. Does it belongs to an UpperLeftSlot = this can be done after check IsStackable for the case "stackable item" that occupied GridSize > {1,1}. But you know what we can also pick a lot of non-stackable items at the same time right (it doesn't appear to be the case in this course, but who know you want to expand it!), hence I decide to check it first
+	/*3. Does it belongs to an UpperLeftSlot (to be clear: Does the current GridSlot is the UpperLeftSlot of this SubGridSlot) = this can be done after check IsStackable for the case "stackable item" that occupied GridSize > {1,1}. But you know what we can also pick a lot of non-stackable items at the same time right (it doesn't appear to be the case in this course, but who know you want to expand it!), hence I decide to check it first
 	*Explain why we need this check:
 	-Outer loop: GridSlots: 0->n
 	-Inner loop: GridSize: [a1->b1, a2->b2] – that could claim a group of GridSlot right in this turn
@@ -282,7 +732,7 @@ bool UUW_Inv_InventoryGrid::IsOutOfBounds(UUW_Inv_InventoryGridSlot* GridSlot, c
 	
 	int32 GridSlotIndex = GridSlot->GridSlotIndex;
 
-	//the NormalizedPosition is (X,Y) , hence Row is Y lol
+	//the HoveredNormalizedPosition is (X,Y) , hence Row is Y lol
 	const int32 row = GridSlotIndex / columns; 
 	const int32 column = GridSlotIndex % columns;
 	int32 EndRow = row + GridDimensions.Y;
@@ -331,6 +781,25 @@ bool UUW_Inv_InventoryGrid::IsUpperLeftSlotOfThisSlot( UUW_Inv_InventoryGridSlot
 	return ThisGridSlot->UpperLeftIndex == PotentialUpperLeftGridSlotToCheck->GridSlotIndex;
 }
 
+bool UUW_Inv_InventoryGrid::HasRoomForGridSizeAtThisSlot(const FIntPoint& GridDimensions, UUW_Inv_InventoryGridSlot* StartGridSlot)
+{
+	bool bHasRoomForGridSizeAtThisSlot = true;
+	UInv_BPFunctionLibrary::ForEach2D<UUW_Inv_InventoryGridSlot*>(
+		GridSlots,
+		StartGridSlot->GridSlotIndex,
+		GridDimensions,
+		columns,
+		[&](UUW_Inv_InventoryGridSlot* SubGridSlot)
+		{
+			if (IsGridSlotPreoccupied(SubGridSlot))
+			{
+				bHasRoomForGridSizeAtThisSlot = false;
+			}
+		});
+	
+	return bHasRoomForGridSizeAtThisSlot;
+}
+
 //this callback is called whenever a ItemEntry is added to PC::InventoryComp::ItemFastArray, but only the one of the same ItemCategory can pass the first if check
 void UUW_Inv_InventoryGrid::OnItemAddedCallback(UItemData* ItemData)
 {
@@ -365,7 +834,7 @@ void UUW_Inv_InventoryGrid::AddItemWidgetsToIndices(const FInventoryAvailability
 void UUW_Inv_InventoryGrid::AddItemWidgetToIndexFromSlotInfo(const FInventorySlotInfo& SlotInfo, const FInventoryAvailabilityInfo& AvailabilityInfo, UItemData* ItemData)
 {
 /****this can be outside the loop*/
-	//step0: [this can be ouTside the loop, but I move it in for READIBILITY and REUSABILITY) ready ItemData::ItemManifest::ItemFragment_1,2,3... (shared for all AvailabilityInfo/Item::SlotInfo)
+	//step0: [this can be outside the loop, but I move it in for READABILITY and REUSABILITY) ready ItemData::ItemManifest::ItemFragment_1,2,3... (shared for all AvailabilityInfo/Item::SlotInfo)
 	//get Fragment_Grid to know the size of the item to occupy how many of the WBP_Grid::Slots
 	const FItemFragment_Grid* ItemFragment_Grid = GetItemFragmentByTag<FItemFragment_Grid>(ItemData, ItemFragmentTags::Fragment_Grid);
 	//get Fragment_Image so that we have an image to show
@@ -426,7 +895,10 @@ void UUW_Inv_InventoryGrid::AddItemWidgetToIndexFromSlotInfo(const FInventorySlo
 	WBP_SlottedItem->bStackable = AvailabilityInfo.bStackable; //bStackable is shared for all potential SlotInfo that is for stackable item, hence you don't find it in AvailabilityInfo::SlotInfo but AvailabilityInfo itself
 	WBP_SlottedItem->GridDimensions = GridDimensions;
 	WBP_SlottedItem->OwningItemData = ItemData; //this mean that "one stackable ItemData" can be associated with "many WBP_Items of the same type" (for stackable item) - it is not "one-one" <=> "many - many for stackable case.
-		
+
+	//Step2C: (NEW) bind WBP_Grid::callback to WBP_SlottedItem::Delegate, doing it here mean this same callback is bound to all created WBP_SlottedItem in inventory (and it is bound right WBP_SlottedItem creation, even before it is being added as child of canvas and it is totally fine, why not) 
+	WBP_SlottedItem->OnSlottedItemClickedDelegate.AddDynamic(this, &ThisClass::OnSlottedItemClicked);
+	
 	/*step3: calculate:
 - GLOBAL size (fixed, can be calculated locally) 
 - starting LOCATION (dynamic, represent by starting index of our WBP_Item in the Canvas)
@@ -490,7 +962,7 @@ Currently AvailabilityInfo::SlotInfo::GridSlotIndex
 		[&](UUW_Inv_InventoryGridSlot* WBP_GridSlot)
 		{
 			if (IsValid(WBP_GridSlot)) WBP_GridSlot->SetSlotStateAndBrush(ESlotState::Occupied);
-			WBP_GridSlot->bAvailable = false;
+			WBP_GridSlot->bAvailable	 = false;
 			WBP_GridSlot->OwningItemData = ItemData;
 			WBP_GridSlot->UpperLeftIndex = SlotInfo.SlotArrayIndex;
 	     	
@@ -508,7 +980,6 @@ Currently AvailabilityInfo::SlotInfo::GridSlotIndex
 		}
 	);
 }
-
 
 //the reason why it works is that when we create GetAvailabilityInfo(ItemData/ItemComponent/ItemManifest) we also consider the case some WBP_SlottedItem instance already in WBP_GridSlot[s]/GridSize and some doesn't create yet. Absolutely amazing!
 void UUW_Inv_InventoryGrid::OnStacksAddedCallback(const FInventoryAvailabilityInfo& AvailabilityInfo)
@@ -544,16 +1015,400 @@ void UUW_Inv_InventoryGrid::OnStacksAddedCallback(const FInventoryAvailabilityIn
 	}
 }
 
+/* What to know:
+(1) row and column to 1DIndex
+1DIndex/GridSlotIndex = i * columns + j //provided that rows(i) is outer loop, column(j) is inner loop
 
+(2) 1DIndex to Row and column:
+RowIndex    = i = GridSlotIndex / columns; //floor is no need, it will be truncated anyway
+ColumnIndex = j = GridSlotIndex % columns; 
+*/
+void UUW_Inv_InventoryGrid::ConstructGridSlots()
+{
+	//good practice: if you're to know how exactly many elements you're to add for your array then just do ".Preserve(n)" for the better performance:
+	GridSlots.Reserve(rows * columns);
+	
+	for (int32 i = 0 ; i < rows; i++)
+	{
+		for (int32 j = 0 ; j < columns; j++)
+		{
+			//construct WBP_GridSlot: (review: if it is not UUW+, then use NewObject<UWidget> and then .AddChild() )
+			UUW_Inv_InventoryGridSlot* GridSlot = CreateWidget<UUW_Inv_InventoryGridSlot>(this, GridSlot_Class);
+			GridSlot->GridSlotIndex = i * columns + j;
 
+			//add it to WBP_InventoryGrid::Canvas (if you don't use AddChild[ToContainer] version, you must then use UWidgetLayoutLibrary::GetSlotAsXSlot(InChildOfXContainer) to get back that slot )
+			UCanvasPanelSlot* CanvasPanelSlot = CanvasPanel_GridSlots->AddChildToCanvas(GridSlot);
 
+			//set its size and position within canvas: there is no need of FIntPoint SlotPosition(j, i) and then "x SlotSize" at all
+			CanvasPanelSlot->SetSize(FVector2D(GridSlotSize, GridSlotSize)); //it also has constructor accept "a" -->"a,a"
 
+			//it must be "X ~ which column/j" and "Y ~ which row/i" so don't do it by habit lol
+			CanvasPanelSlot->SetPosition(FVector2D( j * GridSlotSize, i * GridSlotSize ));
+			
+			//add it to GridSlots array as well:
+			GridSlots.Add(GridSlot);
 
+			//bind delegates, it is pointer so bind before or after .Add doesn't matter:
+			GridSlot->OnGridSlotHovered.AddDynamic(this, &ThisClass::OnGridSlotHovered);
+			GridSlot->OnGridSlotUnhovered.AddDynamic(this, &ThisClass::OnGridSlotUnhovered);
+			GridSlot->OnGridSlotClicked.AddDynamic(this, &ThisClass::OnGridSlotClicked);
+		}
+	}	
+}
 
+void UUW_Inv_InventoryGrid::OnGridSlotHovered(const int32& AffectedGridSlot, const FPointerEvent& PointerEvent)
+{
+	if (IsValid(WBP_HoverItem)) return; //when this is valid it handle itself already, we shouldn't alter it
+	if (GridSlots.IsValidIndex(AffectedGridSlot) == false) return; //for fun, no need
 
+	UUW_Inv_InventoryGridSlot* WBP_GridSlot = GridSlots[AffectedGridSlot];
+	if (WBP_GridSlot->bAvailable)
+	{
+		WBP_GridSlot->SetSlotStateAndBrush(ESlotState::Occupied);
+	}
+}
 
+void UUW_Inv_InventoryGrid::OnGridSlotUnhovered(const int32& AffectedGridSlot, const FPointerEvent& PointerEvent)
+{
+	if (IsValid(WBP_HoverItem)) return; //when this is valid it handle itself already, we shouldn't alter it
+	if (GridSlots.IsValidIndex(AffectedGridSlot) == false) return; //for fun, no need
 
+	UUW_Inv_InventoryGridSlot* WBP_GridSlot = GridSlots[AffectedGridSlot];
+	if (WBP_GridSlot->bAvailable) //even for unhovered, we don't want to touch on a preoccupied one
+	{
+		WBP_GridSlot->SetSlotStateAndBrush(ESlotState::Unoccupied);
+	}
+}
 
+void UUW_Inv_InventoryGrid::OnGridSlotClicked(const int32& AffectedGridSlot, const FPointerEvent& PointerEvent)
+{
+//if WBP_HoverItem is NOT valid. In case we click on WBP_SlottedItem it is self-handled, otherwise we didn't need to do anything. Either case we don't need to do anything here, simply return is enough:
+	if (IsValid(WBP_HoverItem) == false) return;
+	if (GridSlots.IsValidIndex(DropIndex) == false) return; /*no need  -- GetSpaceQueryResult already check and return a default FSpaceQueryResult if it is not valid at first place (hence if it is not valid we'll know below anyway)*/
+	
+/*if WBP_HoverItem is valid we move SlottedItem (WBP_HoverItem-->WBP_SlottedItem on the new index = DropIndex) or swap [WBP_PreoccupiedSlottedItem -> WBP_NewHoverItem (on Mouse)] <-->
+ [WBP_HoverItem              -> WBP_SlottedItem (on PreoccupiedGridSlot::UpperLeftIndex)]
+ */
+	/*this is the case we want to put WBP_HoverItem down (no exchange simply as that), we has a AddItemWidgetToIndex function can be re-used? well it require SlotInfo and AvailabilityInfo, can we fake it? well just use it as a reference lol.
+	-well because we have WBP_HoverItem that more than a backup of WBP_OldSlotItem, hence we simply transition it! hell yeah!I totally forget it lol = but still we need to re-use the inner content of AddItemWidgetToIndex, you can either factorize it to re-use or just repeat what need here*/
+	if (SpaceQueryResult.bHasSpace)
+	{
+	//step1: add back WBP_SlottedItem
+		//OPTION1: refactor AddItemWidgetToIndex{ [Other Ready params; CreateSlottedItem(___), UpdateGridSlotsInGridSize(___)} and then re-use it
+		//OPTION2: fake "SlotInfo and AvailabilityInfo" (only need to filter in what is need) and then re-use AddItemWidgetToIndex directly:
+		FInventorySlotInfo FakeSlotInfo{};
+			FakeSlotInfo.SlotArrayIndex = DropIndex;
+			FakeSlotInfo.AmountToFill   = WBP_HoverItem->StackCount; //kind of fake
+			FakeSlotInfo.IsItemAtIndex  = false;                     //(it is false by default anyway) surely no when bHasSpace=true 
+			
+		FInventoryAvailabilityInfo FakeAvailabilityInfo{};
+			FakeAvailabilityInfo.bStackable = WBP_HoverItem->bStackable; //this matter!
+			FakeAvailabilityInfo.ItemData = WBP_HoverItem->OwningItemData; //this matter!
+			FakeAvailabilityInfo.SlotInfos.Add(FakeSlotInfo);  //this doesn't matter here
+			FakeAvailabilityInfo.TotalRoomToFill = 1;          //this doesn't matter here
+			FakeAvailabilityInfo.Remainder = 0;                //this doesn't matter here
+			
+		AddItemWidgetToIndexFromSlotInfo(FakeSlotInfo, FakeAvailabilityInfo, WBP_HoverItem->OwningItemData.Get());
+
+	//step2: set WBP_HoverItem back to nullptr 
+		/*funny this doesn't really make WBP_HoverItem copy for PC::MouseCursorWidget to go away?
+		-this won't have any effect, because you didn't add it to Viewport at first place
+		-change WBP_HoverItem::Values does change PC::MouseCursorWidget visually, no why it is conventional for good*/
+		WBP_HoverItem->RemoveFromParent(); //for fun, has no effect 
+		WBP_HoverItem = nullptr; //this do have an effect that reduce reference count
+		DropIndex = -1;
+		
+	//step3: re-set MouseCursorWidget to "default one" or "custom one"
+		//OPTION1: when passing in "nullptr" I get the very default mouse cursor back, how cool is that :D :D
+			//GetOwningPlayer()->SetMouseCursorWidget(EMouseCursor::Type::Default, nullptr);
+		//OPTION2: (if you want a custom one lol - we plan to make it have different color when on different WBP_Grid = good practice)
+		ShowVisibleCursorWidget();
+	}
+	/*this is the case we want to exchange (we consider "merge" later don't worry)
+	//should we just assume it is the else case? hell no! it could be HasSpace=false and PreoccupiedItemData=invalid at the same time (when it overlap with 2+ preoccupied items at once or when it is out of bounds)*/
+	else if (SpaceQueryResult.PreoccupiedItemData.IsValid())
+	{
+		/*
+		 (1) we only reach this code  when WBP_HoverItem is valid, and if so, it will only execute the "bottom" part of OnSlottedItemClicked it self (you can can create a separate small function to be called in both here and there if you want = better readibility) 
+		 (2) you don't necessarily exactly click the WBP_PreoccupiedSlottedItem, you click mouse wherever when it overlap with our current WBP_HoverItem, a perfect re-use :D :D
+		-it is like "forward" to the SlottedItemClicked chain (PointerEvent is passed, not even care to filter key, because it is self-handled there already! yeah!)
+		-this chain will naturally SetMouseCursorWidget to the WBP_PreoccupiedHoverItem! how cool is that (but it doesn't handle put the WBP_HoverItem down yet) */
+		OnSlottedItemClicked(SpaceQueryResult.TopLeftSlotIndexOfPreoccupiedItem, PointerEvent);
+	}
+}
+
+bool UUW_Inv_InventoryGrid::IsTheSameStackableItemAsHoverItem(UItemData* ClickedItemData)
+{
+	return WBP_HoverItem->OwningItemData == ClickedItemData &&
+		//we can do this pointer check because UItemData is replicated
+		ClickedItemData->IsStackable() &&
+		ClickedItemData->GetItemTag() == WBP_HoverItem->OwningItemData->GetItemTag(); //this one is redundant 
+}
+
+/****WBP_SlottedItem && OnSlottedItemClicked chain
+ *___Callback is bound to all WBP_SlottedItem::OnSlottedItemClicked in AddItemWidgetToIndexFromSlotInfo
+ * its job is to create new WBP_Hover && destroy and remove WBP_SlottedItem from WBP_Grid::Canvas and SlottedItemMap
+ * - but the ItemData is still in the FastArray (waiting for cases to decide in the end)
+ */
+void UUW_Inv_InventoryGrid::OnSlottedItemClicked(int32 ClickedUpperLeftIndex, const FPointerEvent& MouseEvent)
+{
+//STEP_A: access back the WBP_SlottedItem, [starting] WBP_GridSlot, WBP_GridSlot::OwningItemData from the GridSlot with that GridIndex:
+	if (GridSlots.IsValidIndex(ClickedUpperLeftIndex) == false) return;
+	if (SlottedItemMap.Contains(ClickedUpperLeftIndex) == false) return;
+
+	//we may not need all of them lol, GridSlots and SlottedItemMap are members, hence you can access its associate WBP_SlottedItem and starting WBP_GridSlot any time as long as you have its SlotIndex:
+		//this is upper left one:
+	UUW_Inv_InventoryGridSlot* ClickedUpperLeftGridSlot = GridSlots[ClickedUpperLeftIndex];
+		//this occupies the whole GridSize including upper left above:
+	UUW_Inv_SlottedItem* ClickedSlottedItem = SlottedItemMap[ClickedUpperLeftIndex]; //it stands here as an alternative for ::Values
+
+	/*ItemData is where we get back ItemManifest (and even AvailabilityInfo in other context - but it is appropriate to be used here now). if it isn't valid - something wrong, you better re-check if WBP_GridSlot::OwningItemData is set (it is, it is stored on every WBP_GridSlot in GridSize which I think overkill and give extra work as we need to reset them back to nullptr when we move/remove the ItemData in Grid).
+	 *You can also get it back from WBP_SlottedItem::OwningItemData (store per GridSize)*/
+	UItemData* ClickedItemData = GridSlots[ClickedUpperLeftIndex]->OwningItemData.Get();
+	if (IsValid(ClickedItemData) == false) return; 
+	
+	
+//STEP_EXTRA: handle RightClick <-> WBP_ItemPopup, this time I will create a sub function so that I don't pollute this place lol:	
+	if (MouseEvent.IsMouseButtonDown(EKeys::RightMouseButton))
+	{
+		CreateItemPopupWidget(ClickedUpperLeftIndex);
+	}
+	
+/*STEP_B: only create WBP_HoverItem if "WBP_HoverItem isn't valid && MouseEvent.GetKey() = EKeys::LClick" ( create a new one && Set  WBP_HoverItem::Values exactly the way you did for WBP_SlottedItem in step3)
+ * why we only proceed if(!WBP_HoverItem) ? well because here is what we will do
+ WBP_HoverItem will be generated and assign as we LClick on WBP_SlottedItem
+ WBP_HoverItem will be destroyed and set back to nullptr at the beginning or done moving
+ * meaning if it is valid, then we assume is currently in progress
+ */
+	if (IsValid(WBP_HoverItem) == false &&
+		MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	{
+		//STEP_C + STEP_D:
+		CreateHoverItemAndRemoveClickedSlottedItem(ClickedUpperLeftIndex, ClickedUpperLeftGridSlot, ClickedSlottedItem, ClickedItemData);
+		return;
+	}
+
+	/*STEP_E: if WBP_HoverItem is valid, considering "the incomplete swapping" or "merging/like" (for stackable Item) */
+	/*case1: Are WBP_HoverItem and WBP_PreoccupiedSlottedItem the same type and stackable?
+	 -because  a specific stackable item is stored as a single ItemData in FastArray (and UItemData currently replicated as sub object of UInventoryComp), so we only need to check if the pointers are equal and they're stackable is enough (trying to do A->GetItemTag() == B->GetItemTag() is redundant)*/
+	if (IsValid(WBP_HoverItem) == false) return; 
+	if (WBP_HoverItem->OwningItemData == ClickedItemData && //we can do this pointer check because UItemData is replicated
+		ClickedItemData->IsStackable() &&
+		ClickedItemData->GetItemTag() == WBP_HoverItem->OwningItemData->GetItemTag() //this one is redundant
+	) 
+	{
+	//ready side values
+		//NOT ClickedItemData->TotalStackCount = the actual total of all WBP_SlottedItem 's StackCount of the same stackable type, not of... 
+		//ClickedSlottedItem->StackCount doesn't work, we didn't create this var nor assign it at first place = which is stupid I think
+		//but luckily the TopLeftGridSlot hold it :D :D (you can assign it for all grid slots in GridSize if you want)
+		int32 StackCount_PreoccupiedSlottedItem = ClickedUpperLeftGridSlot->StackCount; 
+		int32 StackCount_HoverItem = WBP_HoverItem->StackCount;
+		int32 MaxStackCount = ClickedItemData->GetMaxStackCount();
+		
+		//Should we swap their stack counts? = why don't we just do nothing? = why don't consider the other way?
+		if (StackCount_PreoccupiedSlottedItem == MaxStackCount && StackCount_HoverItem < MaxStackCount)
+		{
+			//because the ItemData::TotalStackCount for a single stackable type won't change, so swapping stack counts is merely swap SlottedItem::StackCount (didn't create, so must use GridSlot[Index]->StackCount) and WBP_HoverItem::StackCount - as well as update their TextBlock_StackCount
+			//Review: UpperLeftGridSlot always need StackCount variable because we need it to GetAvailabilityInfo(), where WBP_SlottedItem::StackCount remain optional
+			ClickedUpperLeftGridSlot->StackCount = StackCount_HoverItem;   
+			ClickedSlottedItem->UpdateStackCount(StackCount_HoverItem);
+			
+			WBP_HoverItem->StackCount = StackCount_PreoccupiedSlottedItem; //no need
+			WBP_HoverItem->UpdateStackCount(StackCount_PreoccupiedSlottedItem); //already update here
+			return; //the reason why i can still swap them back and forth is I forget to return here? no because after that it move down to the case (StackCount_PreoccupiedSlottedItem < MaxStackCount) - explain why stephen didn't do a symetric "||" HERE!yeah! I got it!
+		}
+		
+		//consume the WBP_HoverItem::Stack when there is still enough room  in WBP_PreoccupiedSlottedItem for them
+		if (StackCount_PreoccupiedSlottedItem + StackCount_HoverItem <= MaxStackCount)
+		{
+			ClickedUpperLeftGridSlot->StackCount += StackCount_HoverItem;   
+			ClickedSlottedItem->UpdateStackCount(ClickedUpperLeftGridSlot->StackCount);
+
+			ShowVisibleCursorWidget();
+			WBP_HoverItem = nullptr; //(*)
+			
+			//we need to reset [PreoccupiedGridSize::GridSlot::State from [GrayedOut -> Occupied], because by doing (*) we're not re-using anything - for each 2D will do? well there is already "HighlightSlots" you can use lol!
+			HighlightSlots(ClickedUpperLeftIndex, ClickedSlottedItem->GridDimensions);
+			return;
+		}
+		
+		//otherwise just fill in WBP_PreoccupiedSlottedItem and keep WBP_HoverItem (with Stack reduced)
+		//this is where you feel like it is swapping (explain why Stephen don't need to use symmetric || for the swapping case)
+		if (StackCount_PreoccupiedSlottedItem < MaxStackCount)
+		{
+			//we already consider the "consume" case, meaning it must be amount left for WBP_HoverItem, so we work on that assumption:
+			int32 AmountToAdd = MaxStackCount - StackCount_PreoccupiedSlottedItem;
+			int32 Remainder = StackCount_HoverItem - AmountToAdd;
+			ClickedUpperLeftGridSlot->StackCount = MaxStackCount;   
+			ClickedSlottedItem->UpdateStackCount(MaxStackCount);
+
+			WBP_HoverItem->StackCount = Remainder; //no need
+			WBP_HoverItem->UpdateStackCount(Remainder);
+			
+			//ShowVisibleCursorWidget(); //hell no, this time we still want WBP_HoverItem remain
+			return;
+		}
+		
+		//the only possibility to reach down here is StackCount_PreoccupiedSlottedItem == StackCount_HoverItem == MaxStackCount, hence think of it like a backup so that we return early, but you can simply put "return" directly so that it won't go down to the "case2" code outside of this if
+		//anyway do nothing (may be play a sound if you want to)
+		if (StackCount_PreoccupiedSlottedItem == MaxStackCount)
+		{
+			return;		
+		}
+	}
+
+//case2: if not, swap WBP_HoverItem and WBP_PreoccupiedSlottedItem
+	//(0) cache the current WBP_HoverItem::Values before remove it:
+	FInventorySlotInfo FakeSlotInfo{};
+	FakeSlotInfo.SlotArrayIndex = DropIndex; //DropIndex if want it start where the mouse is or ClickedUpperLeftIndex if you want it start where the WBP_PreOccupiedSlottedItem - stephen choose DropIndex
+	FakeSlotInfo.AmountToFill   = WBP_HoverItem->StackCount; //this matter! (kind of fake)
+	FakeSlotInfo.IsItemAtIndex  = false;                     //(it is false by default anyway) surely no when bHasSpace=true 
+    				
+	FInventoryAvailabilityInfo FakeAvailabilityInfo{};
+	FakeAvailabilityInfo.bStackable = WBP_HoverItem->bStackable;   //this matter!
+	FakeAvailabilityInfo.ItemData = WBP_HoverItem->OwningItemData; //this matter!
+	FakeAvailabilityInfo.SlotInfos.Add(FakeSlotInfo);  //this doesn't matter here
+	FakeAvailabilityInfo.TotalRoomToFill = 1;          //this doesn't matter here
+	FakeAvailabilityInfo.Remainder = 0;                //this doesn't matter here
+	
+	/*(1) WBP_PreoccupiedSlottedItem -> WBP_NewHoverItem (only one WBP_HoverItem can exist at a time currently) = re-use CreateHoverItemAndRemoveClickedSlottedItem (also used above in case WBP_HoverItem isn't valid) = this has side effect that it changes GridSlots in GridSize::State hence let it be done first
+	- it is OnGridSlotClicked 's responsibility to pass in and forward the right params for this to work! (*)
+	- funny the code of line is exactly above (but the only different is (*)) - explain why I recommend to factonize STEP_E into a sub function to be called both in OnGridSlotClicked and OnSlottedItemClicked for better readability (rather forward from OnGridSlotClicked)*/
+	CreateHoverItemAndRemoveClickedSlottedItem(ClickedUpperLeftIndex, ClickedUpperLeftGridSlot, ClickedSlottedItem, ClickedItemData);
+	
+	//(2) WBP_HoverItem -> WBP_SlottedItem (replace the exact index of WBP_PreoccupiedSlottedItem) = re-use "AddItemAtIndex" (or look at the "PutDown" case in OnGridSlotClicked)	= this doesn't actually need WBP_HoverItem to exist, but it does need WBP_HoverItem::Values to be cached at first place				
+	AddItemWidgetToIndexFromSlotInfo(FakeSlotInfo, FakeAvailabilityInfo, FakeAvailabilityInfo.ItemData.Get()); //not " WBP_HoverItem->OwningItemData.Get()"
+	
+}
+
+//this function triggers when we RClick on WBP_SlottedItem
+void UUW_Inv_InventoryGrid::CreateItemPopupWidget(const int32& OwningIndex)
+{
+//create widget
+	UUW_Inv_ItemPopup* WBP_ItemPopup = CreateWidget<UUW_Inv_ItemPopup>(GetOwningPlayer(), ItemPopup_Class); //or this
+	if (IsValid(WBP_ItemPopup) == false) return; //It will fail when you forget to select the class
+	
+//assign OwningIndex+
+	WBP_ItemPopup->OwningIndex = OwningIndex;
+	
+//add as a child of OuterCanvas,  set position and size for the returning Slot:
+	UCanvasPanelSlot* OuterCanvasSlot = OuterCanvas->AddChildToCanvas(WBP_ItemPopup);
+
+	//try1: we can't use this because PC::GetMousePosition() return absolute position
+	float X,Y;
+	GetOwningPlayer()->GetMousePosition(X,Y); //this is absolute lol (smaller in value), I test it!
+	OuterCanvasSlot->SetPosition(FVector2D(X,Y));
+	OuterCanvasSlot->SetAutoSize(true);
+	OuterCanvasSlot->SetSize(WBP_ItemPopup->GetSizeBox()); //no need
+	
+	//try2: we must do this because it returns local position. we need local position because Setting location in canvas or any sub widget container::SetPosition(InLocalPosition) need you to pass in "Local position" 
+	FVector2D MousePositionOnViewport = UWidgetLayoutLibrary::GetMousePositionOnViewport(this);
+	OuterCanvasSlot->SetPosition(MousePositionOnViewport);
+	OuterCanvasSlot->SetAutoSize(true);
+	OuterCanvasSlot->SetSize(WBP_ItemPopup->GetSizeBox()); //no need
+	
+	//DebugHelpers::Print("PC::GetMousePosition: " + FString::SanitizeFloat(X) + ", " + FString::SanitizeFloat(Y));
+	//DebugHelpers::Print("UWidgetLayoutLibrary::GetMousePositionOnViewport: " + MousePositionOnViewport.ToString());
+}
+
+/*this function can be also re-used when you swap the WBP_PreoccupiedSlottedItem, specifically:
+- the WBP_PreoccupiedSlottedItem will be removed and become WBP_PreoccupiedHover (replace WBP_HoverItem)
+= this function will do it as long as you know info about this WBP_PreoccupiedSlottedItem (its index will be passed as ClicjedGridIndex and so on)
+- the WBP_SlottedItem will be added back at WBP_PreoccupiedSlottedItem::Index (no need to add to FastArray because it was never removed)
+= you must do this additionally (can re-use AddItemWidgetAtIndex by faking SlotInfo or refactor the body function to be re-used)
+, I may consider to factorize it this time.
+*/
+bool UUW_Inv_InventoryGrid::CreateHoverItemAndRemoveClickedSlottedItem(int32 ClickedGridIndex, UUW_Inv_InventoryGridSlot* ClickedGridSlot, UUW_Inv_SlottedItem* ClickedSlottedItem, UItemData* ClickedItemData)
+{
+/*********YOU CAN FACTORIZE THE BELOW INTO "CreateHoverItemFromClickedSlot" if you want to"*************/
+	/*STEP_C: create && set  WBP_HoverItem::Values exactly the way you did for WBP_SlottedItem::Values However this time slightly different
+		- WBP_SlottedItem get all values mostly from SlotInfo and some from ItemData/ItemManifest
+		- here we can steal some info from WBP_SlottedItem itself if you want
+		- however the fun fact is that  WBP_SlottedItem currently only store GridIndex, bStackable, GridSize OwningItemData (not even have StackCount, nor cache TextureImage of Image_Icon)
+		- hence we should simply do it the same way as WBP_SlottedItem from scratch lol (because better off do not choose a way between them that really hard for code maintenance lol, next time if you want to shadow - you better cache all such TextureImage, GridSize and all thing needed on WBP_SlottedItem - but in the end it is optional and cost unnecessarily memory - so stephen don't do it in this course)
+
+		*The small difference: we don't add WBP_HoverItem as child of WBP_Grid::Canvas in the end
+		* we SetMouseCursor(WBP_HoverItem) and so it moves where the mouse is (that a trick!)
+		* because WBP_HoverItem is dynamically spawned directly to the ViewPort (not spawned and added as child of anything), hence we may need to multiply DrawSize with "ViewPortScale" (just test before)
+
+		@@Idea:
+		+copy all code from "AddWidgetItemToIndexFromSlotInfo" to ready to adapt
+		+change "SlottedItem" to "HoverItem" (type/class)
+		+cache in WBP_HoverItem instead of temp var
+		+replace SlotInfo with information from ItemData/WBP_SlottedItems/Whatever as long as it works 
+		*/
+	const FItemFragment_Grid* ItemFragment_Grid = GetItemFragmentByTag<FItemFragment_Grid>(ClickedItemData, ItemFragmentTags::Fragment_Grid);
+	//get Fragment_Image so that we have an image to show
+	const FItemFragment_Image* ItemFragment_Image = GetItemFragmentByTag<FItemFragment_Image>(ClickedItemData, ItemFragmentTags::Fragment_Image);
+
+	if (ItemFragment_Image == nullptr /*|| ItemFragment_Grid == nullptr */ ) return true;
+
+	float GridPadding =  ItemFragment_Grid? ItemFragment_Grid->GridPadding : 0.f; //or a different "default" padding
+	//~GridSize can be retrieved from WBP_SlottedItem::GridDimensions (but anyway I don't bother to do it)
+	FIntPoint GridDimensions = ItemFragment_Grid? ItemFragment_Grid->GridDimensions : FIntPoint(1, 1);
+	//~you can also get bStackable from WBP_SlottedItem::Stackable as well
+	bool bStackable = ClickedItemData->IsStackable() /*AvailabilityInfo.bStackable*/;
+			
+	//step1: CreateWidget<WBP_Item>(WBP_Item_Class)
+	WBP_HoverItem = CreateWidget<UUW_Inv_HoverItem>(GetOwningPlayer(), HoverItem_Class);
+
+	//step2A: set WBP_Item::BindWidgets::Values 
+	FSlateBrush IconBrush;
+	IconBrush.ImageSize = GridDimensions * (GridSlotSize - GridPadding * 2.f); //STEPHEN
+	IconBrush.ImageSize =
+		FDeprecateSlateVector2D(GridDimensions * GridSlotSize) -
+		FDeprecateSlateVector2D( GridPadding * 2.f, (GridPadding * 2.f)); //ME
+	IconBrush.ImageSize = IconBrush.ImageSize  * UWidgetLayoutLibrary::GetViewportScale(this); //MODIFIED: this time it won't fit into Canvas (but follow MouseCursor) - hence stephen scale it so that WBP_HoverItem will have appropriate size as the Viewport is scaled weirdly (WBP_HoverItem global size currently determine by UImage_Icon::ImageSize as it doesn't have SizeBox and it dynamically spawned to viewport on MouseCursor location)			
+			
+	IconBrush.SetResourceObject(ItemFragment_Image->Icon);
+	IconBrush.DrawAs = ESlateBrushDrawType::Type::Image;
+	WBP_HoverItem->SetImageIcon(IconBrush);
+	WBP_HoverItem->UpdateStackCount( bStackable?  ClickedGridSlot->StackCount /*SlotInfo.AmountToFill*/ : 0); //0 so that it collapses
+
+	//step2B: set WBP_Item::SideValues. I set WBP_HoverItem::StackCount in UpdateStackCount above already!
+	WBP_HoverItem->GridIndex = ClickedGridSlot->GridSlotIndex /*SlotInfo.SlotArrayIndex*/;
+	WBP_HoverItem->bStackable = bStackable /*AvailabilityInfo.bStackable*/; 
+	WBP_HoverItem->GridDimensions = GridDimensions;
+	WBP_HoverItem->OwningItemData = ClickedItemData; 
+
+	/*Step2C: (NEW) bind WBP_Grid::callback to WBP_HoverItem::Delegate, doing it here mean this same callback is bound to all created WBP_HoverItem in inventory (and it is bound right WBP_HoverItem creation
+		 , even before it is being added as child of canvas and it is totally fine, why not) 
+			//WBP_HoverItem->OnHoverItemClickedDelegate.AddDynamic(this, &ThisClass::OnHoverItemClickedCallback);
+		*/
+		
+	/*Step3&4: this time you don't need CanvasSize nor DrawPosition because WBP_HoverItem will follow MouseLocation!*/
+	GetOwningPlayer()->SetMouseCursorWidget(EMouseCursor::Type::Default, WBP_HoverItem);
+		
+	/*step5: bookkeeping? it is stored right at step1 above lol! **/
+
+/***************YOU CAN FACTORIZE THE BELOW TO "RemoveClickedSlottedItem" if you want to*****/
+	/*step6: change SlotState of occupied WBP_GridSlot[s] by GridSize (WBP_Grid::GridSlots)
+	    && set its ::Values*/
+	ClickedGridSlot->StackCount = 0; //I forget this step
+	UInv_BPFunctionLibrary::ForEach2D<UUW_Inv_InventoryGridSlot*>(
+		GridSlots, ClickedGridSlot->GridSlotIndex /*SlotInfo.SlotArrayIndex*/, GridDimensions, columns,
+		[&](UUW_Inv_InventoryGridSlot* WBP_GridSlot)
+		{
+			if (IsValid(WBP_GridSlot) == false) return;
+			WBP_GridSlot->SetSlotStateAndBrush(ESlotState::Unoccupied); //Occupied back to Unoccupied
+			WBP_GridSlot->bAvailable = true; //false back to true
+			WBP_GridSlot->OwningItemData.Reset(); //ClickedItemData back to "nullptr"
+			WBP_GridSlot->UpperLeftIndex = INDEX_NONE /*SlotInfo.SlotArrayIndex*/; // ClickedGridSlot->GridSlotIndex back to INDEX_NONE
+			//WBP_GridSlot->StackCount = 0; //this is overkill better off do it on the upperleft gridslot only
+		}
+	);
+	/*STEP_D: remove the WBP_SlottedItem from WBP_Grid::Canvas and so SlottedItemMap (you're not gonna remove WBP_GridSlot lol, you only change its values and background brush like above)
+	- Meaning FastArray still contain the Owning ItemData, either we spawn WBP_SlottedItem back (say to new location in canvas) or destroy it is up to whether you drag it out of Inventory or else!
+	- this also work:
+			TObjectPtr<UUW_Inv_SlottedItem> OutValue;
+			SlottedItemMap.RemoveAndCopyValue(ClickedGridIndex, OutValue);
+			OutValue->RemoveFromParent();
+	 
+	 */
+	SlottedItemMap.Remove(ClickedGridIndex);
+	ClickedSlottedItem->RemoveFromParent();   //CanvasPanel_GridSlots->RemoveChild(ClickedSlottedItem); also works, but not preferred!
+	return false;
+}
 
 
 /*MoveTemp(InObject) <=> std::move(InObject) in C++
@@ -594,3 +1449,5 @@ FInventoryAvailabilityInfo AvailabilityInfo;
 	
 	return AvailabilityInfo;
 	*/
+
+

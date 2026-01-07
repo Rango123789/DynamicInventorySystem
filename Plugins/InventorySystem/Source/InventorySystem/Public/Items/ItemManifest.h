@@ -60,7 +60,7 @@ struct FItemManifest
 
 public: //these are also optional helper (create it here or in ItemData both okay)
 	FIntPoint GetGridDimensions() const;
-	int32 GetMaxStackSize() const;
+	int32 GetMaxStackCount() const;
 	bool IsStackable() const;
 };
 

@@ -34,12 +34,15 @@ public:
 	const FItemManifest& GetItemManifest() const{ return ItemManifestWrapper.Get<FItemManifest>();};
 	//use this version for modifying (directly access to the Wrapper also have the same outcome)
 	FItemManifest& GetItemManifestMutable() { return ItemManifestWrapper.GetMutable<FItemManifest>();}
+	int32 GetMaxStackCount() const;
 
 //these are just optional and for convenience should we need to access anything in ItemData::ItemManifest::Values directly from ItemData: (you can always create them directly from FItemManifest itself)
 	bool IsStackable() const;
 	const FGameplayTag& GetItemTag() const;
 	const EItemCategory& GetItemCategory() const;
 	bool IsItemOfType(const FGameplayTag& ItemTagToCheck) const;
+
+	FIntPoint GetGridDimensions() const;
 protected:
 	/*used FInstancedStruct<FItemManifiest+> instead FItemManifiest so that it can change/swap out any children of FItemManifiest (or any generict if you don't use meta to restruct its base struct class at first place)
 	-because it is now in UObject, you want it replicated, you need "Replicated" (UPROPERTY() like struct is not enough)

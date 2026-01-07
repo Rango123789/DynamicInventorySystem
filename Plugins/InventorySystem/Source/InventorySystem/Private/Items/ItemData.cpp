@@ -30,6 +30,11 @@ void UItemData::SetItemManifestWrapperWithItemManifest(const FItemManifest& InIt
 	ItemManifestWrapper = FInstancedStruct::Make<FItemManifest>(InItemManifest);
 }
 
+int32 UItemData::GetMaxStackCount() const
+{
+	return GetItemManifest().GetMaxStackCount();
+}
+
 bool UItemData::IsStackable() const
 {
 	const FItemFragment_Stackable* ItemFragment_Stackable =
@@ -50,4 +55,9 @@ const EItemCategory& UItemData::GetItemCategory() const
 bool UItemData::IsItemOfType(const FGameplayTag& ItemTagToCheck) const
 {
 	return GetItemTag() == ItemTagToCheck;
+}
+
+FIntPoint UItemData::GetGridDimensions() const
+{
+	return GetItemManifest().GetGridDimensions();
 }

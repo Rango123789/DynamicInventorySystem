@@ -21,7 +21,7 @@ FIntPoint FItemManifest::GetGridDimensions() const
 	return ItemFragment_Grid ? ItemFragment_Grid->GridDimensions : FIntPoint(1, 1);
 }
 
-int32 FItemManifest::GetMaxStackSize() const
+int32 FItemManifest::GetMaxStackCount() const
 {
 	const FItemFragment_Stackable* ItemFragment_Stackable = GetItemFragmentByType<FItemFragment_Stackable>();
 	return ItemFragment_Stackable ? ItemFragment_Stackable->MaxStackSize : 1;

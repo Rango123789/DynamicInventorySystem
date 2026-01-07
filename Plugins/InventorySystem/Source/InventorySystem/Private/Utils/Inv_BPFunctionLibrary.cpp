@@ -4,6 +4,7 @@
 #include "Utils/Inv_BPFunctionLibrary.h"
 
 #include "ActorComponent/Inv_InventoryComponent.h"
+#include "Components/Widget.h"
 #include "Player/Inv_PlayerController.h"
 
 //so basically "rows" param doesn't matter at all! because the direction we count [0 ---> [colum] ]
@@ -47,4 +48,20 @@ UInv_InventoryComponent* UInv_BPFunctionLibrary::GetInventoryComponentFromPC(APl
 	return Inv_PlayerController->InventoryComponent.IsValid() ?
 		   Inv_PlayerController->InventoryComponent.Get() :
 		   Inv_PlayerController->FindComponentByClass<UInv_InventoryComponent>();
+}
+
+//this is just a little mathematics challenge, this is my favorite: (Rider auto-fill, but I can do it myself)
+bool UInv_BPFunctionLibrary::IsLocationWithinWidgetSize(const FVector2D& Origin,
+	const FVector2D& PositionToCheck, const FVector2D& WidgetSize)
+{
+	bool bIsWithinX = PositionToCheck.X >= Origin.X && PositionToCheck.X <= Origin.X + WidgetSize.X;
+	bool bIsWithinY = PositionToCheck.Y >= Origin.Y && PositionToCheck.Y <= Origin.Y + WidgetSize.Y;
+	
+	return bIsWithinX && bIsWithinY;
+}
+
+//FDeprecatedVector2DResult will be auto-converted to FVector2D
+FVector2D UInv_BPFunctionLibrary::GetWidgetSize(const UWidget* Widget)
+{
+	return Widget->GetCachedGeometry().GetLocalSize();
 }

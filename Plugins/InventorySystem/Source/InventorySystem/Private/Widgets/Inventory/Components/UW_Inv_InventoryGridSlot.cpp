@@ -9,7 +9,7 @@ void UUW_Inv_InventoryGridSlot::SetSlotStateAndBrush(ESlotState InSlotState) con
 {
 	switch (InSlotState)
 	{
-	case ESlotState::UOccupied:
+	case ESlotState::Unoccupied:
 		Image_GridSlot->SetBrush(UnoccupiedBrush);
 		break;
 	case ESlotState::Occupied:
@@ -22,4 +22,27 @@ void UUW_Inv_InventoryGridSlot::SetSlotStateAndBrush(ESlotState InSlotState) con
 		Image_GridSlot->SetBrush(GrayedOutBrush);
 		break;
 	}
+}
+
+void UUW_Inv_InventoryGridSlot::NativeOnMouseEnter(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	Super::NativeOnMouseEnter(InGeometry, InMouseEvent); //this help to call the BP version (not used in this course)
+
+	OnGridSlotHovered.Broadcast(GridSlotIndex, InMouseEvent);
+}
+
+void UUW_Inv_InventoryGridSlot::NativeOnMouseLeave(const FPointerEvent& InMouseEvent)
+{
+	Super::NativeOnMouseLeave(InMouseEvent); //this help to call the BP version
+
+	OnGridSlotUnhovered.Broadcast(GridSlotIndex, InMouseEvent);
+}
+
+FReply UUW_Inv_InventoryGridSlot::NativeOnMouseButtonDown(const FGeometry& InGeometry,
+	const FPointerEvent& InMouseEvent)
+{
+	OnGridSlotClicked.Broadcast(GridSlotIndex, InMouseEvent);
+
+	//universal rule: a function return FReply will require you to return either ::Handled or Unhandled, not Super::
+	return FReply::Handled();
 }

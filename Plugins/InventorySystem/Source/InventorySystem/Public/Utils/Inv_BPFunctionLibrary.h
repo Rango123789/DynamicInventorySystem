@@ -6,6 +6,7 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Inv_BPFunctionLibrary.generated.h"
 
+class UWidget;
 class UInv_InventoryComponent;
 /**
  * 
@@ -33,6 +34,10 @@ public:
 	//STEPHEN: as long as you pass in a function/lambda that make Function(Array[TileIndex] make sense then it will work (I don't like this one, it is prone to error in both definition and using)
 	template<typename T, typename Func>
 	static void ForEach2D(TArray<T>& Array, int32 Index, const FIntPoint& Range2D, int32 Columns, const Func& Function);
+
+	static bool IsLocationWithinWidgetSize(const FVector2D& Origin, const FVector2D& PositionToCheck,
+									   const FVector2D& WidgetSize);
+	static FVector2D GetWidgetSize(const UWidget* Widget);
 };
 
 template <typename T>

@@ -130,7 +130,7 @@ struct FItemFragment_Stackable : public FItemFragment
 	UPROPERTY(EditAnywhere, Category="Inventory")
 	int32 StackCount = 1; 
 
-	//the maximum count per "GridDimensions" it can stack on
+	//the maximum count per "GridDimensions" it can stack on - MaxStackSize sound inconsistent and stupid, better off name name it MaxStackCount lol
 	UPROPERTY(EditAnywhere, Category="Inventory")
 	int32  MaxStackSize = 1; //OR MaxStackCountPerGridDimensions
 };

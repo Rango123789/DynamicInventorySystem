@@ -28,7 +28,7 @@ public class InventorySystem : ModuleRules
 				"Core", "NetCore", "UMG", "StructUtils", "GameplayTags"
 				// ... add other public dependencies that you statically link with here ...
 			}
-			);
+		);
 			
 		
 		PrivateDependencyModuleNames.AddRange(
@@ -37,10 +37,12 @@ public class InventorySystem : ModuleRules
 				"CoreUObject",
 				"Engine",
 				"Slate",
-				"SlateCore", "EnhancedInput" //, "UMG"
+				"SlateCore", 
+				"InputCore",
+				"EnhancedInput" //, "UMG"
 				// ... add private dependencies that you statically link with here ...	
 			}
-			);
+		);
 		
 		
 		DynamicallyLoadedModuleNames.AddRange(
