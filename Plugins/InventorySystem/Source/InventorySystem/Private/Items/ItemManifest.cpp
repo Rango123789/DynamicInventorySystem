@@ -3,6 +3,7 @@
 
 #include "Items/ItemManifest.h"
 
+#include "ActorComponent/Inv_ItemComponent.h"
 #include "InventoryTags/InventoryTags.h"
 #include "Items/ItemData.h"
 
@@ -13,6 +14,24 @@ UItemData* FItemManifest::ManifestItemData(UObject* Outer) const
 	CreatedItemData->SetItemManifestWrapperWithItemManifest(*this);
 	
 	return CreatedItemData;
+}
+
+/*you must pass in an WorldObjectContext for it to get the world successfully, WorldObjectContext of Actor is always ULevel/UWorld
+ *NOT only this function help to spawn an actor back but also set this manifest as AActor::ItemComponent::SourceItemManifest
+ *so the idea is that you modify this manifest to your needbefore calling this function!
+*/
+void FItemManifest::SpawnDroppedItem(UObject* WorldObjectContext, const FVector& SpawnLocation, const FRotator& SpawnRotation)
+{
+	UWorld* World = WorldObjectContext->GetWorld();
+	AActor* SpawnActor = World->SpawnActor<AActor>(ItemClassToSpawn, SpawnLocation, SpawnRotation);
+	if (IsValid(SpawnActor) == false) return;
+	
+	UActorComponent* ActorComponent = SpawnActor->GetComponentByClass(UInv_ItemComponent::StaticClass());
+	UInv_ItemComponent* ItemComponent = Cast<UInv_ItemComponent>(ActorComponent);
+	if (IsValid(ItemComponent) == false) return;
+
+	//this is just a copy assignment, so no worry:
+	ItemComponent->SourceItemManifest = *this;
 }
 
 FIntPoint FItemManifest::GetGridDimensions() const

@@ -1,6 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 #include "ActorComponent/Inv_InventoryComponent.h"
 
+#include "EditorCategoryUtils.h"
 #include "ActorComponent/Inv_ItemComponent.h"
 #include "Blueprint/UserWidget.h"
 #include "Items/ItemData.h"
@@ -178,15 +179,16 @@ void UInv_InventoryComponent::ServerRPC_AddStacksToExistingStackableItem_Impleme
 	{
 		ItemComponent->PickedUp();
 	}
-	else
-	{
+	//UPDATE: I think either case we need to set ItemFragment_Stackable->StackCount =  Remainder!, not just else case
+	//else
+	//{
 		//the current version return "const T*" so we can't modify it lol, hence how we need the multable version:
 		if (FItemFragment_Stackable* ItemFragment_Stackable =
 				ItemComponent->SourceItemManifest.GetMutableItemFragmentByType<FItemFragment_Stackable>())
 		{
 			ItemFragment_Stackable->StackCount = Remainder; //both Stephen and I set it correctly already
 		}
-	}
+	//}
 }
 
 //but this like I love to add "bStackable" to make it clear
@@ -212,6 +214,113 @@ void UInv_InventoryComponent::ServerRPC_AddNewItem_Implementation(UInv_ItemCompo
 	}
 
 	//TODO: tell the ItemComponent to destroy its owning actor (BP_Item) in the level (well there is a possibility that you need to update BP_Item::ItemManifest::Fragment_Stackable::StackCount as well if it is the first time you pick it up but you don't have room for all stackcount lol):
+	//but you don't actually to modify the copying ItemManifest::Fragment_Stackable::StackCount because it is not used when enter inventory (well this we must check lol) and it will be modified to "StackCountForDropItem" before we spawn BP_DroppedItem as we drop it
 	ItemComponent->PickedUp();
+}
+
+
+void UInv_InventoryComponent::ServerRPC_DropItem_Implementation(UItemData* ItemData, int32 StackCountToDrop)
+{
+	/* non-stackable item always has the passed-in StackCountToDrop=0, ItemData->TotalStackCount=0 => StackLeft=0 (we always need to destroy non-stackable item in the FastArray, they don't share ItemData even if they're instances of the same type)
+	 * stackable item we don't know, if StackLeft=0 we need to destroy the ItemData
+	-->do not confuse: StackLeft is with Inventory, where StackCountToDrop is with BP_Item*/
+	int32 StackLeft = ItemData->TotalStackCount - StackCountToDrop;
+	
+	//either non-stackable or stackable running out of TotalStackCount will have this same outcome:
+	if (StackLeft <= 0 )
+	{
+		//Question: remove it from the FastArray will remove it too? well it is previously to be replicated as sub object of InventoryComponent so there is a chance that it is till persist? 
+		ItemFastArray.RemoveItemEntry(ItemData); //trigger PostReplicatedRemove() if the need arise = I feel like we don't even need it (we just remove WBP_SlottedItem even before we execute this RPC in server lol)
+	}
+	// else
+	// {
+	// 	ItemData->TotalStackCount = StackLeft;
+	// }
+
+	//it think we should do it anyway: (not just in the else case)
+	ItemData->TotalStackCount = StackLeft;
+	
+	//either of the cases we need to spawn back an BP_Item into world:
+	SpawnDroppedItem(ItemData, StackCountToDrop);
+}
+
+/*
++ Currently ItemManifest::ManifestItemData() can create ItemData + assign ItemData::ItemManifest = itself
++ Now from there we also create ItemManifest::SpawnDroppedItem() that create BP_Item from ItemManifest::BP_Item_Class + assign BP_Item::ItemManifest = itself -- absolutely stunning lol
++ Here is the steps in overall:
+(1) FItemManifest TempManifest = ItemData->ItemManifest (either it is still in Inventory or to be removed because TotalStack=0 or it is non-stackable item)
+(2) TempManifest::StackCount = StackCountForDroppedItem
+(3) TempManifest::SpawnDroppedActor()  <=> not only spawn an actor from TempManifest::BP_Item_Class (which is copied exactly from  ItemData->ItemManifest::BP_Item_Class) but also assign TempManifest for it
+--->amazing!
+ */
+void UInv_InventoryComponent::SpawnDroppedItem(UItemData* ItemData, int32 StackCountForDroppedItem)
+{
+/*step1: ready spawned location (and rotation if needed = I don't see the need because if I recall correctly it is rotating anyway right lol? yes no need)
+#My Idea:
+(1) Location = BP_Character::Location + CameraForward * Distance
+||              BP_Character::Location + BP_Character::ForwardVector * Distance
+-- not sure I can use BP_Character::CameraActor or must I use "de-project" again lol?
+-- anyway we don't want to cast to UCameraComponent lol, so it is not the idea
+-- de-project is not good as you think, because what if I look downwards or upwards too much loL? well you can make pitch=0 
+-- hence I think "
+(2) Rotation = leave it as FRotator::ZeroRotator
+
+#Stephen Idea:
+(1) Location =  BP_Character::Location + BP_Character::ForwardVector * Distance, in which ForwardVector is randomly modified by many factors
+(2) Rotation = leave it as FRotator::ZeroRotator
+
+@@conclusion: stephen idea is the best, because what if you drop 2 items consecutively and they share the same location lol?
+*/
+	if (OwningPlayerController.IsValid() == false) return;
+	APawn* Pawn = OwningPlayerController->GetPawn();
+
+	FVector ForwardVector = Pawn->GetActorForwardVector();
+	ForwardVector.Z = 0.f; 
+	ForwardVector = ForwardVector.RotateAngleAxis( FMath::RandRange(DropMinAngle, DropMaxAngle), FVector::UpVector);
+	FVector SpawnLocation = Pawn->GetActorLocation() + ForwardVector * FMath::RandRange(DropMinDistance, DropMaxDistance);
+	SpawnLocation.Z += ZOffset; //UPDATE
+	
+	FRotator SpawnRotation = FRotator::ZeroRotator;
+	
+//step2: the ItemManifest to be assigned to BP_Item_Dropped is the exact copy of ItemData::ItemManifest. Except  BP_Item_Dropped:::StackCount need to be modified to StackCountForDroppedItem (only make sense for stackable item, but it doesn't hurt if it is non-stackable item)
+	/*this is also just a copy assignment: (we certainly won't want to point to the same data because it could be EITHER:
+	-ItemData will be removed? well not likely after it is NewObject and add as SubReplicatedObject of ___). but anyway I feel we better move the SpawnDroppedItem code before FastArray.Remove(ItemData) code for the worst case? (well just play test, if it crashes we change the order lol)
+	-ItemData still in the FastArray, but we don't want to modify that ItemData::SourceItemData neither in this case lol, hence a copy is a must
+	*/
+	FItemManifest& TempManifest = ItemData->GetItemManifestMutable(); //mutable is not needed, it is copy. Reference or not doesn't matter because modify the staying ItemManifest::ItemFragment_Stackable doesn't affect anything in the Inventory (it is ItemData::TotalStackCount that matter)
+
+	//no point trying to modify StackCount if it is not stackable lol:
+	if (TempManifest.IsStackable())
+	{
+		FItemFragment_Stackable* ItemFragment_Stackable = TempManifest.GetMutableItemFragmentByType<FItemFragment_Stackable>(); //but here needed
+		ItemFragment_Stackable->StackCount = StackCountForDroppedItem;
+	}
+	
+//step3: spawn BP_Item back to world with that "StackCountForDroppedItem"
+	TempManifest.SpawnDroppedItem(this, SpawnLocation, SpawnRotation);
+}
+
+//in this course we pass in "1" for StackCountToConsume at where we call this RPC, you can change it if you want
+//the code is exactly like ServerRPC_DropItem above except that it doesn't need to SpawnDroppedItem!
+void UInv_InventoryComponent::ServerRPC_ConsumeItem_Implementation(UItemData* ItemData, int32 StackCountToConsume)
+{
+	int32 StackLeft = ItemData->TotalStackCount - StackCountToConsume;
+	
+	//either non-stackable or stackable running out of TotalStackCount will have this same outcome:
+	if (StackLeft <= 0 )
+	{
+		//Question: remove it from the FastArray will remove it too? well it is previously to be replicated as sub object of InventoryComponent so there is a chance that it is till persist? 
+		ItemFastArray.RemoveItemEntry(ItemData); //trigger PostReplicatedRemove() if the need arise 
+	}
+
+	//it think we should do it anyway: (not just in the else case)
+	ItemData->TotalStackCount = StackLeft;
+
+//TODO: extra thing when consume an item: access BP_Character/Like, increase Health or do whatever you like with it
+	if (FItemFragment_Consumable* ItemFragment_Consumable =
+			ItemData->GetItemManifestMutable().GetMutableItemFragmentByType<FItemFragment_Consumable>())
+	{
+		ItemFragment_Consumable->OnConsume(OwningPlayerController.Get());	
+	}
 }
 

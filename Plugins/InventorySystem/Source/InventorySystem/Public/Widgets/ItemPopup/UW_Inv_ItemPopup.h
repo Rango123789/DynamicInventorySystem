@@ -26,9 +26,9 @@ class INVENTORYSYSTEM_API UUW_Inv_ItemPopup : public UUserWidget
 public:
 	FVector2D GetSizeBox() const;
 	
-	FOnDropDelegate OnDrop;
-	FOnConsumeDelegate OnConsume;
-	FOnSplitDelegate OnSplit;
+	FOnDropDelegate OnDropDelegate;
+	FOnConsumeDelegate OnConsumeDelegate;
+	FOnSplitDelegate OnSplitDelegate;
 
 	int32 OwningIndex = INDEX_NONE;
 protected:
@@ -38,11 +38,11 @@ protected:
 
 	
 	UFUNCTION()
-	void OnSplitButtonClicked();
+	void OnSplitButtonClickedCallback();
 	UFUNCTION()
-	void OnDropButtonClicked();
+	void OnDropButtonClickedCallback();
 	UFUNCTION()
-	void OnConsumeButtonClicked();
+	void OnConsumeButtonClickedCallback();
 	UFUNCTION()
 	void OnSplitSliderValueChanged(float Value);
 
@@ -70,6 +70,10 @@ public:
 	void CollapseSplit() const;
 	void CollapseConsume() const;
 
-	//the value it accepts will be still "float" as it is (it is underlying type you can't help it), only the TextBlock will round it for showing purpose:
-	void SetSliderValueAndParams(float InValue, float InMax) const;
+	/*the value it accepts will be still "float" as it is (it is underlying type you can't help it), only the TextBlock will round it for showing purpose:
+	Do not confuse:
+	- MaxStackCount  = fixed
+	- MaxSplitAmount = WBP_SlottedItem::StackCount - 1 = its subject to change contextually  
+	*/
+	void SetSliderValueAndParams(float InSplitAmount, float InMaxSplitAmount) const;
 };

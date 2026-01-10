@@ -127,6 +127,7 @@ struct FItemFragment_Stackable : public FItemFragment
 
 	//how many the BP_Item:::ItemComp::ItemManifest::Fragments::Fragment_Stackable::StackCount in world (can be changed differently in world if you want to or LIKE)
 	//we may need to modify this (i,e modify BP_Item:::ItemComp::ItemManifest::Fragments::Fragment_Stackable::StackCount) in the case we can't pick all of it because inventory is full
+	//UPDATE: i think the best default value is "0", not "1" ? well no worry because this fragment either exist or not exist at first place!
 	UPROPERTY(EditAnywhere, Category="Inventory")
 	int32 StackCount = 1; 
 
@@ -134,3 +135,42 @@ struct FItemFragment_Stackable : public FItemFragment
 	UPROPERTY(EditAnywhere, Category="Inventory")
 	int32  MaxStackSize = 1; //OR MaxStackCountPerGridDimensions
 };
+
+/******Consumable fragments*********
+ * we only add FItemFragment_Consumable_X,Y,Z on BP_Item::ItemManifest::ItemFragments
+ * we do GetFragmentByType<FItemFragment_Consumable>()->OnConsume() it will auto trigger the child version
+ */
+USTRUCT(BlueprintType)
+struct FItemFragment_Consumable : public FItemFragment
+{
+	GENERATED_BODY()
+
+	//this is where the magic of polymorphism begins:
+	virtual void OnConsume(APlayerController* PC){};
+};
+
+USTRUCT(BlueprintType)
+struct FItemFragment_Consumable_Health : public FItemFragment_Consumable
+{
+	GENERATED_BODY()
+
+	//different BP_HealthPotion_X,Y,Z simply adjust this value differently! yeah!
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	float Health = 20.f;
+	
+	virtual void OnConsume(APlayerController* PC) override;
+};
+
+USTRUCT(BlueprintType)
+struct FItemFragment_Consumable_Mana : public FItemFragment_Consumable
+{
+	GENERATED_BODY()
+	
+	//different BP_ManaPotion_X,Y,Z simply adjust this value differently! yeah!
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	float Mana = 50.f;
+	
+	virtual void OnConsume(APlayerController* PC) override;
+};
+
+/******End Consumable fragments**********/

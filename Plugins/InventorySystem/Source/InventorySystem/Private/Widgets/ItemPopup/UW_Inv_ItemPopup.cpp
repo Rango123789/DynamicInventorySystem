@@ -13,10 +13,12 @@ void UUW_Inv_ItemPopup::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
 
-	Button_SplitStacks->OnClicked.AddDynamic(this, &ThisClass::OnSplitButtonClicked);
+	Slider_SplitStacks->SetStepSize(1.f);
+
+	Button_SplitStacks->OnClicked.AddDynamic(this, &ThisClass::OnSplitButtonClickedCallback);
 	Slider_SplitStacks->OnValueChanged.AddDynamic(this, &ThisClass::OnSplitSliderValueChanged);
-	Button_Drop->OnClicked.AddDynamic(this, &ThisClass::OnDropButtonClicked);
-	Button_Consume->OnClicked.AddDynamic(this, &ThisClass::OnConsumeButtonClicked);
+	Button_Drop->OnClicked.AddDynamic(this, &ThisClass::OnDropButtonClickedCallback);
+	Button_Consume->OnClicked.AddDynamic(this, &ThisClass::OnConsumeButtonClickedCallback);
 }
 
 void UUW_Inv_ItemPopup::NativeOnMouseLeave(const FPointerEvent& InMouseEvent)
@@ -37,30 +39,30 @@ void UUW_Inv_ItemPopup::CollapseConsume() const
 	Button_Consume->SetVisibility(ESlateVisibility::Collapsed);
 }
 
-void UUW_Inv_ItemPopup::OnSplitButtonClicked()
+void UUW_Inv_ItemPopup::OnSplitButtonClickedCallback()
 {
 	float FloatValue = Slider_SplitStacks->GetValue();
-	int32 IntValue = FMath::Floor(FloatValue); //Floor because we will set Min = 1, Max = passed-in Max (rather then RoundToInt)
+	int32 IntValue = FMath::RoundToInt(FloatValue); //Stephen choose: Floor because we will set Min = 1, Max = passed-in Max? = this is irrelevant
 	
-	if (OnSplit.ExecuteIfBound(OwningIndex, IntValue))
+	if (OnSplitDelegate.ExecuteIfBound(OwningIndex, IntValue))
 	{
 		RemoveFromParent();
 	}
 }
 
-void UUW_Inv_ItemPopup::OnDropButtonClicked()
+void UUW_Inv_ItemPopup::OnDropButtonClickedCallback()
 {
-	if (OnDrop.ExecuteIfBound(OwningIndex))
+	if (OnDropDelegate.ExecuteIfBound(OwningIndex))
 	{
-		RemoveFromParent();	
+		RemoveFromParent();
 	}
 }
 
-void UUW_Inv_ItemPopup::OnConsumeButtonClicked()
+void UUW_Inv_ItemPopup::OnConsumeButtonClickedCallback()
 {
-	if (OnConsume.ExecuteIfBound(OwningIndex))
+	if (OnConsumeDelegate.ExecuteIfBound(OwningIndex))
 	{
-		RemoveFromParent();	
+		RemoveFromParent();
 	}
 }
 
@@ -70,16 +72,14 @@ void UUW_Inv_ItemPopup::OnSplitSliderValueChanged(float Value)
 	TextBlock_SplitAmount->SetText(FText::FromString(FString::FromInt(Value)));
 }
 
-void UUW_Inv_ItemPopup::SetSliderValueAndParams(float InValue, float InMax) const
+void UUW_Inv_ItemPopup::SetSliderValueAndParams(float InSplitAmount, float InMaxSplitAmount) const
 {
-	Slider_SplitStacks->SetValue(InValue);
+	Slider_SplitStacks->SetValue(InSplitAmount);
 	Slider_SplitStacks->SetMinValue(1.0f);
-	Slider_SplitStacks->SetMaxValue(InMax);
+	Slider_SplitStacks->SetMaxValue(InMaxSplitAmount);
 	
-	TextBlock_SplitAmount->SetText(FText::FromString(FString::FromInt(InValue)));
+	TextBlock_SplitAmount->SetText(FText::FromString(FString::FromInt(FMath::RoundToInt(InSplitAmount))));
 }
-
-
 
 FVector2D UUW_Inv_ItemPopup::GetSizeBox() const
 {

@@ -28,6 +28,7 @@ class INVENTORYSYSTEM_API UInv_InventoryComponent : public UActorComponent
 public:
 	UInv_InventoryComponent();
 	void AddReplicatedSubObjectHelper(UObject* InObject /*ToBeReplicatedAsSubObjectOfThisActorComponent*/);
+	void SpawnDroppedItem(UItemData* ItemData, int32 StackCountForDroppedItem);
 
 	//I always want OnRep for fast array, note that the limitation to this is that you can't have "OldArray", hence if you need it one you need to manually create it (note that it is not for reason of overhead when having that param in general, because it doesn't cost extra replication at all, it handles locally)
 	UPROPERTY(ReplicatedUsing = OnRep_ItemFastArray, EditAnywhere, Category = "Inventory")
@@ -81,17 +82,35 @@ protected:
 	UPROPERTY(EditAnywhere, meta = (Category = "Inventory"))
 	TSubclassOf<UUW_Inv_Inventory_Spacial> InventoryClass;
 
-	//if it is the first one construct something, let's use UPROPERTY() to hold and manage it
-	UPROPERTY()
-	TObjectPtr<UUW_Inv_Inventory_Spacial> WBP_Inventory_Spacial;
 
 	//we follow good practice: if it is not the one first construct something, let's use "TWeakObjectPtr" from now on
 	TWeakObjectPtr<APlayerController> OwningPlayerController;
+public:
+	//if it is the first one construct something, let's use UPROPERTY() to hold and manage it
+	UPROPERTY()
+	TObjectPtr<UUW_Inv_Inventory_Spacial> WBP_Inventory_Spacial;
 private:
 	void SetupInventory();
+
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	float DropMinAngle = -85.f;
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	float DropMaxAngle = 85.f;
+
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	float DropMinDistance = 20.f;
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	float DropMaxDistance = 100.f;
 	
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	float ZOffset = 0;
 public:
-	
+	//"bool bStackable" is optional because if StackCountToDrop=0 make us know it is NOT stackable already. I need to be called from WBP_Grid, hence it must be public:
+	//either drop SlottedItem or HoverItem must go by this way
+	UFUNCTION(Server, Reliable)
+	void ServerRPC_DropItem(UItemData* ItemData, int32 StackCountToDrop);
+	UFUNCTION(Server, Reliable)
+	void ServerRPC_ConsumeItem(UItemData* ItemData, int32 StackCountToConsume);
 };
 
 /* Quick recap:

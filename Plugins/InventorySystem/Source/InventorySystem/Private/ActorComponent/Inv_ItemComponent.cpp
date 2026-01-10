@@ -3,9 +3,18 @@
 
 #include "ActorComponent/Inv_ItemComponent.h"
 
+#include "Net/UnrealNetwork.h"
+
 UInv_ItemComponent::UInv_ItemComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
+	SetIsReplicatedByDefault(true);
+}
+
+void UInv_ItemComponent::GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(ThisClass, SourceItemManifest); //ThisClass works, I recall it didn't work?
 }
 
 //currently called from Server in ServerRPC

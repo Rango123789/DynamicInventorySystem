@@ -16,12 +16,13 @@ class INVENTORYSYSTEM_API UInv_ItemComponent : public UActorComponent
 public:
 	// Sets default values for this component's properties
 	UInv_ItemComponent();
+	virtual void GetLifetimeReplicatedProps(TArray<class FLifetimeProperty>& OutLifetimeProps) const override;
 
 	UPROPERTY(EditAnywhere, Category="Inventory")
 	FText PickupMessage = FText::FromString("E - Pick up");
 
 	//this is the SourceItemManifest to be EditAnywhere in BP_Item::ItemComponent and to be assigned to PC::InventoryComp::ItemFastArray::ItemEntries::ItemEntry_i::ItemData::ItemManifest[Wrapper] (to be actually go into PC::InventoryComp::WBP_Inventory)
-	UPROPERTY(EditAnywhere, Category="Inventory")
+	UPROPERTY(Replicated, EditAnywhere, Category="Inventory")
 	FItemManifest SourceItemManifest;
 
 protected:

@@ -40,6 +40,9 @@ public:
 
 	
 protected:
+	virtual void NativeOnMouseEnter(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual void NativeOnMouseLeave(const FPointerEvent& InMouseEvent) override;
+	
 	//bind widgets
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UImage> Image_Icon;

@@ -24,6 +24,7 @@ namespace ItemFragmentTags
 	UE_DEFINE_GAMEPLAY_TAG(Fragment_Grid, "Fragment.Grid");
 	UE_DEFINE_GAMEPLAY_TAG(Fragment_Image, "Fragment.Image");
 	UE_DEFINE_GAMEPLAY_TAG(Fragment_Stackable, "Fragment.Stackable");
+	UE_DEFINE_GAMEPLAY_TAG(Fragment_Consumable, "Fragment.Consumable");
 }
 
 /* I don't like this

@@ -59,13 +59,18 @@ public:
 		
 	void ShowVisibleCursorWidget();
 	void ShowHiddenCursorWidget(); //sounds weird, but yes, Hidden widget will have some opacity (not completely hide)
-	
+
+	void DropHoverItem();
 protected:
 	UFUNCTION()
 	void OnStacksAddedCallback(const FInventoryAvailabilityInfo& AvailabilityInfo);
 	bool CreateHoverItemAndRemoveClickedSlottedItem(int32 ClickedGridIndex, UUW_Inv_InventoryGridSlot* ClickedGridSlot,
 	                                                UUW_Inv_SlottedItem* ClickedSlottedItem,
 	                                                UItemData* ClickedItemData);
+	void CreateHoverItem(UUW_Inv_InventoryGridSlot* ClickedGridSlot,
+	                     UItemData* ClickedItemData, int32 StackOverride = -1);
+	void RemoveClickedSlottedItem(int32 ClickedGridIndex, UUW_Inv_InventoryGridSlot* ClickedGridSlot,
+	                              UUW_Inv_SlottedItem* ClickedSlottedItem, FIntPoint GridDimensions);
 	virtual void NativeOnInitialized() override;
 	bool DoesItemMatchGridCategory(UItemData* ItemData);
 	void ConstructGridSlots();
@@ -79,6 +84,7 @@ protected:
 	void OnItemAddedCallback(UItemData* ItemData);
 	UFUNCTION()
 	void OnSlottedItemClicked(int32 ClickedUpperLeftIndex, const FPointerEvent& MouseEvent);
+		
 	void CreateItemPopupWidget(const int32& OwningIndex);
 	
 	UFUNCTION()
@@ -89,8 +95,15 @@ protected:
 	void OnGridSlotClicked(const int32& AffectedGridSlot, const FPointerEvent& PointerEvent);
 	bool IsTheSameStackableItemAsHoverItem(UItemData* ClickedItemData);
 
+	UFUNCTION()
+	void OnSplitButtonClicked(int32 OwningIndex, int32 SplitAmount);
+	UFUNCTION()
+	void OnConsumeButtonClicked(int32 OwningIndex);
+	UFUNCTION()
+	void OnDropButtonClicked(int32 OwningIndex);
+	void ClearHoverItem();
 
-	
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Inventory")
 	int32 columns = 8;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Inventory")
@@ -121,6 +134,12 @@ protected:
 
 	UPROPERTY(EditAnywhere, Category = "Inventory")
 	TSubclassOf<UUW_Inv_ItemPopup> ItemPopup_Class;
+
+	UPROPERTY()
+	TObjectPtr<UUW_Inv_ItemPopup> WBP_ItemPopup = nullptr;
+
+	UPROPERTY(EditAnywhere, Category = "Inventory")
+	FVector2D ItemPopupOffset = {-10.f,-10.f};
 	
 	/*why dont' create TArray<WBP_SlottedItem> but TMap<int32, WBP_SlottedItem>?
 	- The key "int32" HERE will be in fact the SlotInfo::SlotArrayIndex / WBP_Item::GridIndex (just shadow from SlotInfo) / WBP_Inventory::InventoryGrid::WBP_GridSlot::SlotArrayIndex (cosmetic background, not involve in what we go next)

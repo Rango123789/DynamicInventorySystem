@@ -1281,35 +1281,181 @@ void UUW_Inv_InventoryGrid::OnSlottedItemClicked(int32 ClickedUpperLeftIndex, co
 	
 }
 
+
 //this function triggers when we RClick on WBP_SlottedItem
 void UUW_Inv_InventoryGrid::CreateItemPopupWidget(const int32& OwningIndex)
 {
-//create widget
-	UUW_Inv_ItemPopup* WBP_ItemPopup = CreateWidget<UUW_Inv_ItemPopup>(GetOwningPlayer(), ItemPopup_Class); //or this
-	if (IsValid(WBP_ItemPopup) == false) return; //It will fail when you forget to select the class
+//step1: create widget
+	//UUW_Inv_ItemPopup* WBP_ItemPopup = CreateWidget<UUW_Inv_ItemPopup>(GetOwningPlayer(), ItemPopup_Class); //or this
+	//if (IsValid(WBP_ItemPopup) == false) return; //It will fail when you forget to select the class
+
+	if (IsValid(WBP_ItemPopup)) return; //if there is one ... then shouldn't create more until it is destroyed
+	WBP_ItemPopup = CreateWidget<UUW_Inv_ItemPopup>(GetOwningPlayer(), ItemPopup_Class);
+
+	//to make sure it is destroyed when the inventory is closed (but not now, because we didn't know when WBP_ItemPopup::RemoveFromParent() is called). Go to OnNativeDestruct and you will see that the delegate require "UUW* " param
+	WBP_ItemPopup->OnNativeDestruct.AddLambda([this](UUserWidget* Menu) { WBP_ItemPopup = nullptr; }); 
 	
-//assign OwningIndex+
+//step2: assign OwningIndex+
 	WBP_ItemPopup->OwningIndex = OwningIndex;
 	
-//add as a child of OuterCanvas,  set position and size for the returning Slot:
-	UCanvasPanelSlot* OuterCanvasSlot = OuterCanvas->AddChildToCanvas(WBP_ItemPopup);
+//step3: add as a child of OuterCanvas,  set position and size for the returning Slot:
+	UCanvasPanelSlot* OuterCanvasSlot = OuterCanvas->AddChildToCanvas(WBP_ItemPopup.Get());
 
-	//try1: we can't use this because PC::GetMousePosition() return absolute position
+	/*try1: we can't use this because PC::GetMousePosition() return absolute position
 	float X,Y;
 	GetOwningPlayer()->GetMousePosition(X,Y); //this is absolute lol (smaller in value), I test it!
-	OuterCanvasSlot->SetPosition(FVector2D(X,Y));
+	OuterCanvasSlot->SetPosition(FVector2D(X,Y) + ItemPopupOffset);
 	OuterCanvasSlot->SetAutoSize(true);
 	OuterCanvasSlot->SetSize(WBP_ItemPopup->GetSizeBox()); //no need
+	
+	DebugHelpers::Print("PC::GetMousePosition: " + FString::SanitizeFloat(X) + ", " + FString::SanitizeFloat(Y));
+	DebugHelpers::Print("UWidgetLayoutLibrary::GetMousePositionOnViewport: " + MousePositionOnViewport.ToString());
+	*/
 	
 	//try2: we must do this because it returns local position. we need local position because Setting location in canvas or any sub widget container::SetPosition(InLocalPosition) need you to pass in "Local position" 
 	FVector2D MousePositionOnViewport = UWidgetLayoutLibrary::GetMousePositionOnViewport(this);
-	OuterCanvasSlot->SetPosition(MousePositionOnViewport);
+	OuterCanvasSlot->SetPosition(MousePositionOnViewport + ItemPopupOffset);
 	OuterCanvasSlot->SetAutoSize(true);
 	OuterCanvasSlot->SetSize(WBP_ItemPopup->GetSizeBox()); //no need
+
+//step4: callbacks to WBP_ItemPopup::Delegates
+	//always bind Drop:
+	WBP_ItemPopup->OnDropDelegate.BindDynamic(this, &ThisClass::OnDropButtonClicked);
 	
-	//DebugHelpers::Print("PC::GetMousePosition: " + FString::SanitizeFloat(X) + ", " + FString::SanitizeFloat(Y));
-	//DebugHelpers::Print("UWidgetLayoutLibrary::GetMousePositionOnViewport: " + MousePositionOnViewport.ToString());
+	//only bind Split if it is stackable item and StackCount >= 2 <=> MaxSplitAmount >= 1
+	UItemData* ItemData = GridSlots[OwningIndex]->OwningItemData.Get();
+	if (IsValid(ItemData) == false) return;
+	
+	int32 MaxSplitAmount = GridSlots[OwningIndex]->StackCount - 1;
+	bool bIsStackable = ItemData->IsStackable();
+	if (MaxSplitAmount >=1 &&
+		bIsStackable)         //redundant, because if it non-stackable, StackCount=0 and the first condition can't be met
+	{
+		WBP_ItemPopup->SetSliderValueAndParams( FMath::Max(1.f , MaxSplitAmount / 2.f ), MaxSplitAmount);
+		WBP_ItemPopup->OnSplitDelegate.BindDynamic(this, &ThisClass::OnSplitButtonClicked);
+	}
+	else
+	{
+		WBP_ItemPopup->CollapseSplit();
+	}
+	
+	//only Consume if it is ItemCategory is consumable: (consumable, equippable, craftable  -- totally independent from stackable)
+	if (ItemData->GetItemCategory() == EItemCategory::Consumable)
+	{
+		WBP_ItemPopup->OnConsumeDelegate.BindDynamic(this, &ThisClass::OnConsumeButtonClicked);
+	}
+	else
+	{
+		WBP_ItemPopup->CollapseConsume();
+	}
 }
+
+void UUW_Inv_InventoryGrid::OnDropButtonClicked(int32 OwningIndex)
+{
+//step0: ready (copy almost everything from OnSplitButtonClicked)
+	//if we already reach here, most of the checks are not needed, but anyway:
+	if (GridSlots.IsValidIndex(OwningIndex) == false) return;
+	if (SlottedItemMap.Contains(OwningIndex) == false) return;
+
+	UUW_Inv_InventoryGridSlot* GridSlot = GridSlots[OwningIndex];
+	UItemData* ItemData = GridSlot->OwningItemData.Get();
+	if (IsValid(ItemData) == false) return;
+	UUW_Inv_SlottedItem* SlottedItem = SlottedItemMap[OwningIndex];
+
+/*OPTION1: clean option but not re-usable*/
+	/*step1: remove from WBP_Grid (cosmetic). Basically you may feel to do it last, but since ServerRPC is sent to be executed in the server after a ping delay, so this code always run before code in ServerRPC no matter where it is in this function! hence Stephen decide to do it first:
+	//this set GridSlot::StackCount=0, re-set states of grid slots in GridSize (directly - no HoverItem appear, no need "ShowVisibleCursor()" back neither! -- without create HoverItem and then remove HoverItem like Stephen lol - waste too much free time :D :D )
+	//cache the GridSlot->StackCount before it is set back to zero:*/
+	int32 StackCountToDrop = GridSlot->StackCount;
+	
+	//this has side effect and set StackCount=0, hence we need to cache it or call the step2 first!
+	RemoveClickedSlottedItem(OwningIndex, GridSlot, SlottedItem, ItemData->GetGridDimensions());
+	
+	//step2: remove from FastArray (must be done in Server) && spawn BP_Item back to world (must be done in Server as well, hence wrapped in the same ServerRPC)
+	UInv_BPFunctionLibrary::GetInventoryComponentFromPC(GetOwningPlayer())->ServerRPC_DropItem( ItemData, StackCountToDrop);
+
+/*OPTION2: replace step1,2 and factorize it into DropItem so that it can be re-used = you can still always re-use lol, just create the DropHoverItem()
+	//this make WBP_SlottedItem disappear and WBP_HoverItem appear:
+	CreateHoverItemAndRemoveClickedSlottedItem(OwningIndex, GridSlot, SlottedItem, ItemData);
+
+	//factorize this into "DropHoverItem()":
+	DropHoverItem();
+ */
+}
+
+void UUW_Inv_InventoryGrid::ClearHoverItem()
+{
+	if (IsValid(WBP_HoverItem) == false) return;
+	
+	WBP_HoverItem->RemoveFromParent(); 
+	WBP_HoverItem = nullptr;
+	ShowVisibleCursorWidget();
+}
+
+void UUW_Inv_InventoryGrid::DropHoverItem()
+{
+	if (IsValid(WBP_HoverItem) == false) return;
+	if (WBP_HoverItem->OwningItemData.IsValid() == false) return; 
+	UInv_BPFunctionLibrary::GetInventoryComponentFromPC(GetOwningPlayer())->ServerRPC_DropItem( WBP_HoverItem->OwningItemData.Get(), WBP_HoverItem->StackCount);
+
+	ClearHoverItem();
+}
+
+//from WBP_ItemPopupSize, Players adjust Slider and see the wanted SplitAmount. And then press the SplitButton. the current value of slider, that is the SplitAmount, will be broadcast here. And we only need to handle it
+void UUW_Inv_InventoryGrid::OnSplitButtonClicked(int32 OwningIndex, int32 SplitAmount)
+{
+//ready:
+	//if we already reach here, most of the checks are not needed, but anyway:
+	if (GridSlots.IsValidIndex(OwningIndex) == false) return;
+	if (SlottedItemMap.Contains(OwningIndex) == false) return;
+
+	UUW_Inv_InventoryGridSlot* GridSlot = GridSlots[OwningIndex];
+	UItemData* ItemData = GridSlot->OwningItemData.Get();
+		if (IsValid(ItemData) == false) return;
+		if (ItemData->IsStackable() == false) return; 
+	UUW_Inv_SlottedItem* SlottedItem = SlottedItemMap[OwningIndex]; //let it crash if it doesn't contain
+	
+//reduce StackCount of WBP_SlottedItem:
+	GridSlot->StackCount -= SplitAmount;  //you don't want forget this step lol
+	SlottedItem->UpdateStackCount(GridSlot->StackCount); //we just reduce it, don't reduce twice lol
+	
+//create WBP_HoverItem with OverrideStackCount = SplitAmount (not removing WBP_SlottedItem)
+	CreateHoverItem(GridSlot, ItemData, SplitAmount);
+}
+
+
+void UUW_Inv_InventoryGrid::OnConsumeButtonClicked(int32 OwningIndex)
+{
+//ready:
+	//if we already reach here, most of the checks are not needed, but anyway:
+	if (GridSlots.IsValidIndex(OwningIndex) == false) return;
+	if (SlottedItemMap.Contains(OwningIndex) == false) return;
+
+	UUW_Inv_InventoryGridSlot* GridSlot = GridSlots[OwningIndex];
+	UItemData* ItemData = GridSlot->OwningItemData.Get();
+	if (IsValid(ItemData) == false) return;
+	if (ItemData->IsStackable() == false) return; 
+	UUW_Inv_SlottedItem* SlottedItem = SlottedItemMap[OwningIndex]; //let it crash if it doesn't contain
+	
+//step1: (COSMETIC ~ Split, but WBP_HoverItem need not to create, cause' we consume it)
+	//reduce StackCount of WBP_SlottedItem or remove it if StackCount reach zero:
+	GridSlot->StackCount -= 1;  //you don't want forget this step lol
+
+	//the "if" will cover 2 cases: "non-stackable" and "stackable" reaching "0".
+	//"<" will be important in case it is non-stackable item start of with StackCount=0
+	if (GridSlot->StackCount <= 0) 
+	{
+		RemoveClickedSlottedItem(OwningIndex, GridSlot, SlottedItem, ItemData->GetGridDimensions());
+	}
+	else
+	{
+		SlottedItem->UpdateStackCount(GridSlot->StackCount); //we just reduce it, don't reduce twice lol	
+	}
+	
+//step2: (REPLICATION ~ Drop, but we don't need to spawn BP_DroppedItem - we literally consume it)
+	UInv_BPFunctionLibrary::GetInventoryComponentFromPC(GetOwningPlayer())->ServerRPC_ConsumeItem(ItemData, 1);
+}
+
 
 /*this function can be also re-used when you swap the WBP_PreoccupiedSlottedItem, specifically:
 - the WBP_PreoccupiedSlottedItem will be removed and become WBP_PreoccupiedHover (replace WBP_HoverItem)
@@ -1410,6 +1556,89 @@ bool UUW_Inv_InventoryGrid::CreateHoverItemAndRemoveClickedSlottedItem(int32 Cli
 	return false;
 }
 
+void UUW_Inv_InventoryGrid::CreateHoverItem(UUW_Inv_InventoryGridSlot* ClickedGridSlot, UItemData* ClickedItemData, int32 StackOverride)
+{
+		const FItemFragment_Grid* ItemFragment_Grid = GetItemFragmentByTag<FItemFragment_Grid>(ClickedItemData, ItemFragmentTags::Fragment_Grid);
+	//get Fragment_Image so that we have an image to show
+	const FItemFragment_Image* ItemFragment_Image = GetItemFragmentByTag<FItemFragment_Image>(ClickedItemData, ItemFragmentTags::Fragment_Image);
+
+	if (ItemFragment_Image == nullptr /*|| ItemFragment_Grid == nullptr */ ) return;
+
+	float GridPadding =  ItemFragment_Grid? ItemFragment_Grid->GridPadding : 0.f; //or a different "default" padding
+	//~GridSize can be retrieved from WBP_SlottedItem::GridDimensions (but anyway I don't bother to do it)
+	FIntPoint GridDimensions = ItemFragment_Grid? ItemFragment_Grid->GridDimensions : FIntPoint(1, 1);
+	//~you can also get bStackable from WBP_SlottedItem::Stackable as well
+	bool bStackable = ClickedItemData->IsStackable() /*AvailabilityInfo.bStackable*/;
+			
+	//step1: CreateWidget<WBP_Item>(WBP_Item_Class)
+	WBP_HoverItem = CreateWidget<UUW_Inv_HoverItem>(GetOwningPlayer(), HoverItem_Class);
+
+	//step2A: set WBP_Item::BindWidgets::Values 
+	FSlateBrush IconBrush;
+	IconBrush.ImageSize = GridDimensions * (GridSlotSize - GridPadding * 2.f); //STEPHEN
+	IconBrush.ImageSize =
+		FDeprecateSlateVector2D(GridDimensions * GridSlotSize) -
+		FDeprecateSlateVector2D( GridPadding * 2.f, (GridPadding * 2.f)); //ME
+	IconBrush.ImageSize = IconBrush.ImageSize  * UWidgetLayoutLibrary::GetViewportScale(this); //MODIFIED: this time it won't fit into Canvas (but follow MouseCursor) - hence stephen scale it so that WBP_HoverItem will have appropriate size as the Viewport is scaled weirdly (WBP_HoverItem global size currently determine by UImage_Icon::ImageSize as it doesn't have SizeBox and it dynamically spawned to viewport on MouseCursor location)			
+			
+	IconBrush.SetResourceObject(ItemFragment_Image->Icon);
+	IconBrush.DrawAs = ESlateBrushDrawType::Type::Image;
+	WBP_HoverItem->SetImageIcon(IconBrush);
+
+	//modified:
+	if (StackOverride >= 0)
+	{
+		WBP_HoverItem->UpdateStackCount(StackOverride);
+	}
+	else
+	{
+		WBP_HoverItem->UpdateStackCount( bStackable?  ClickedGridSlot->StackCount /*SlotInfo.AmountToFill*/ : 0); //0 so that it collapsed	
+	}
+
+	//step2B: set WBP_Item::SideValues. I set WBP_HoverItem::StackCount in UpdateStackCount above already!
+	WBP_HoverItem->GridIndex = ClickedGridSlot->GridSlotIndex /*SlotInfo.SlotArrayIndex*/;
+	WBP_HoverItem->bStackable = bStackable /*AvailabilityInfo.bStackable*/; 
+	WBP_HoverItem->GridDimensions = GridDimensions;
+	WBP_HoverItem->OwningItemData = ClickedItemData; 
+
+	/*Step2C: (NEW) bind WBP_Grid::callback to WBP_HoverItem::Delegate, doing it here mean this same callback is bound to all created WBP_HoverItem in inventory (and it is bound right WBP_HoverItem creation
+		 , even before it is being added as child of canvas and it is totally fine, why not) 
+			//WBP_HoverItem->OnHoverItemClickedDelegate.AddDynamic(this, &ThisClass::OnHoverItemClickedCallback);
+		*/
+		
+	/*Step3&4: this time you don't need CanvasSize nor DrawPosition because WBP_HoverItem will follow MouseLocation!*/
+	GetOwningPlayer()->SetMouseCursorWidget(EMouseCursor::Type::Default, WBP_HoverItem);
+		
+	/*step5: bookkeeping? it is stored right at step1 above lol! **/
+}
+
+void UUW_Inv_InventoryGrid::RemoveClickedSlottedItem(int32 ClickedGridIndex, UUW_Inv_InventoryGridSlot* ClickedGridSlot, UUW_Inv_SlottedItem* ClickedSlottedItem, FIntPoint GridDimensions)
+{
+	ClickedGridSlot->StackCount = 0; //I forget this step
+	UInv_BPFunctionLibrary::ForEach2D<UUW_Inv_InventoryGridSlot*>(
+		GridSlots, ClickedGridSlot->GridSlotIndex /*SlotInfo.SlotArrayIndex*/, GridDimensions, columns,
+		[&](UUW_Inv_InventoryGridSlot* WBP_GridSlot)
+		{
+			if (IsValid(WBP_GridSlot) == false) return;
+			WBP_GridSlot->SetSlotStateAndBrush(ESlotState::Unoccupied); //Occupied back to Unoccupied
+			WBP_GridSlot->bAvailable = true; //false back to true
+			WBP_GridSlot->OwningItemData.Reset(); //ClickedItemData back to "nullptr"
+			WBP_GridSlot->UpperLeftIndex = INDEX_NONE /*SlotInfo.SlotArrayIndex*/; // ClickedGridSlot->GridSlotIndex back to INDEX_NONE
+			//WBP_GridSlot->StackCount = 0; //this is overkill better off do it on the upperleft gridslot only
+		}
+	);
+	/*STEP_D: remove the WBP_SlottedItem from WBP_Grid::Canvas and so SlottedItemMap (you're not gonna remove WBP_GridSlot lol, you only change its values and background brush like above)
+	- Meaning FastArray still contain the Owning ItemData, either we spawn WBP_SlottedItem back (say to new location in canvas) or destroy it is up to whether you drag it out of Inventory or else!
+	- this also work:
+			TObjectPtr<UUW_Inv_SlottedItem> OutValue;
+			SlottedItemMap.RemoveAndCopyValue(ClickedGridIndex, OutValue);
+			OutValue->RemoveFromParent();
+	 
+	 */
+	//the order may matter, because reference from Container may keep the widget alive unintentionally, so perhaps remove this reference first.
+	SlottedItemMap.Remove(ClickedGridIndex); 
+	ClickedSlottedItem->RemoveFromParent();   //CanvasPanel_GridSlots->RemoveChild(ClickedSlottedItem); also works, but not preferred!
+}
 
 /*MoveTemp(InObject) <=> std::move(InObject) in C++
 	 *

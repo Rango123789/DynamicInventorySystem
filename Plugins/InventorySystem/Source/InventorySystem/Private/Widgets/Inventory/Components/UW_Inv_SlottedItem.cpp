@@ -4,6 +4,7 @@
 
 #include "Components/Image.h"
 #include "Components/TextBlock.h"
+#include "Utils/Inv_BPFunctionLibrary.h"
 
 FReply UUW_Inv_SlottedItem::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
@@ -33,4 +34,16 @@ void UUW_Inv_SlottedItem::UpdateStackCount(const int32& InStackCount) const
 	{
 		TextBlock_StackCount->SetVisibility(ESlateVisibility::Collapsed);
 	}
+}
+
+void UUW_Inv_SlottedItem::NativeOnMouseEnter(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	Super::NativeOnMouseEnter(InGeometry, InMouseEvent);
+	UInv_BPFunctionLibrary::OnItemHovered(GetOwningPlayer(), OwningItemData.Get());
+}
+
+void UUW_Inv_SlottedItem::NativeOnMouseLeave(const FPointerEvent& InMouseEvent)
+{
+	Super::NativeOnMouseLeave(InMouseEvent);
+	UInv_BPFunctionLibrary::OnItemUnhovered(GetOwningPlayer());
 }

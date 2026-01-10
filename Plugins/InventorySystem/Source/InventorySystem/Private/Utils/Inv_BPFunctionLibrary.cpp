@@ -65,3 +65,14 @@ FVector2D UInv_BPFunctionLibrary::GetWidgetSize(const UWidget* Widget)
 {
 	return Widget->GetCachedGeometry().GetLocalSize();
 }
+
+void UInv_BPFunctionLibrary::OnItemHovered(APlayerController* PC, UItemData* HoveredItemData)
+{
+	UInv_InventoryComponent* InventoryComp = GetInventoryComponentFromPC(PC);
+	InventoryComp->WBP_
+}
+
+void UInv_BPFunctionLibrary::OnItemUnhovered(APlayerController* PC)
+{
+	
+}

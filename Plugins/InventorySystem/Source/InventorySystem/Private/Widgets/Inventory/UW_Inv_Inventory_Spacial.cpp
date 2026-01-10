@@ -27,6 +27,14 @@ void UUW_Inv_Inventory_Spacial::NativeOnInitialized()
 	ShowEquippableTab();
 }
 
+//when HoverItem is valid, we drop it no matter key we press (optionally check ActiveGrid->bIsInVanvas, but in fact no need because GridSlots cover all part of it)
+FReply UUW_Inv_Inventory_Spacial::NativeOnMouseButtonDown(const FGeometry& InGeometry,
+	const FPointerEvent& InMouseEvent)
+{
+	ActiveInventoryGrid->DropHoverItem();
+	return FReply::Handled();
+}
+
 //you can create SetActiveGrid(ButtonToDisable, GridToBeActive) , so that you don't repeat yourself
 void UUW_Inv_Inventory_Spacial::ShowEquippableTab()
 {
@@ -43,7 +51,7 @@ void UUW_Inv_Inventory_Spacial::ShowConsumableTab()
 
 void UUW_Inv_Inventory_Spacial::ShowCraftableTab()
 {
-	SetActiveInventoryGrid(InventoryGrid_Craftable, Button_Craftable);
+	// SetActiveInventoryGrid(InventoryGrid_Craftable, Button_Craftable);
 }
 
 void UUW_Inv_Inventory_Spacial::SetActiveInventoryGrid(UUW_Inv_InventoryGrid* GridToBeActive, UButton* ButtonToDisable)

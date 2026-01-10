@@ -23,7 +23,9 @@ public:
 protected:
 	
 	virtual void NativeOnInitialized() override;
-
+	//currently its subs WBP_SlottedItem, WBP_GridSlot, WBP_ItemPopup (added as child of either canvases that is part of this WBP_Host tree) also override this function and return Handled(), hence this parent version won't trigger in case you click on them:
+	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	
 	UFUNCTION()
 	void ShowEquippableTab();
 	UFUNCTION()

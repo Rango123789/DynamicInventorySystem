@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Items/ItemData.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Inv_BPFunctionLibrary.generated.h"
 
@@ -38,6 +39,8 @@ public:
 	static bool IsLocationWithinWidgetSize(const FVector2D& Origin, const FVector2D& PositionToCheck,
 									   const FVector2D& WidgetSize);
 	static FVector2D GetWidgetSize(const UWidget* Widget);
+	void OnItemHovered(APlayerController* PC, UItemData* HoveredItemData );
+	void OnItemUnhovered(APlayerController* PC);
 };
 
 template <typename T>

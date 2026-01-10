@@ -32,7 +32,8 @@ namespace ItemFragmentTags
 {
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Fragment_Grid);
 	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Fragment_Image);
-	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Fragment_Stackable);	
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Fragment_Stackable);
+	UE_DECLARE_GAMEPLAY_TAG_EXTERN(Fragment_Consumable);
 }
 
 /* I dont like this

@@ -29,6 +29,12 @@ struct FItemManifest
 	  Outer should be passed as PC/PC::InventoryComponent for the sake of the requirement of an Outer for replication:*/
 	UItemData* ManifestItemData(UObject* Outer) const;
 
+	void SpawnDroppedItem(UObject* WorldObjectContext, const FVector& SpawnLocation, const FRotator& SpawnRotation);
+
+	//For each BP_Item_X, we must select BP_Item_X:::ItemClassToSpawn = BP_Item_X itself to spawn it back! yeah!
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	TSubclassOf<AActor> ItemClassToSpawn = nullptr;
+	
 	// meta = (Categories= "Filter.Tag") only applied for FGameplayTag and F___Container, if it is used on other types it will be ignored
 	//stephen didn't have this, I follow Vince good practice to filter out some!
 	UPROPERTY(EditAnywhere, Category="Inventory", meta = (Categories = "Item"))
