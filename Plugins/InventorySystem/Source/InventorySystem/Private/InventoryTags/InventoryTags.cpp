@@ -22,9 +22,12 @@ namespace ItemTags
 namespace ItemFragmentTags
 {
 	UE_DEFINE_GAMEPLAY_TAG(Fragment_Grid, "Fragment.Grid");
-	UE_DEFINE_GAMEPLAY_TAG(Fragment_Image, "Fragment.Image");
+	UE_DEFINE_GAMEPLAY_TAG(Fragment_Image, "Fragment.Image"); //it is also Fragment.Widget.Image
 	UE_DEFINE_GAMEPLAY_TAG(Fragment_Stackable, "Fragment.Stackable");
 	UE_DEFINE_GAMEPLAY_TAG(Fragment_Consumable, "Fragment.Consumable");
+
+	UE_DEFINE_GAMEPLAY_TAG(Fragment_Widget_Text, "Fragment.Widget.Text");
+	UE_DEFINE_GAMEPLAY_TAG(Fragment_Widget_LabeledNumber, "Fragment.Widget.LabeledNumber");
 }
 
 /* I don't like this

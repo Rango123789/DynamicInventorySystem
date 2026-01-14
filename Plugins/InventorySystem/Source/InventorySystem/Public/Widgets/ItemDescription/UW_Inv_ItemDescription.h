@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Blueprint/UserWidget.h"
+#include "Widgets/CompositePattern/UW_Inv_Composite.h"
 #include "UW_Inv_ItemDescription.generated.h"
 
 class USizeBox;
@@ -11,7 +11,7 @@ class USizeBox;
  * 
  */
 UCLASS()
-class INVENTORYSYSTEM_API UUW_Inv_ItemDescription : public UUserWidget
+class INVENTORYSYSTEM_API UUW_Inv_ItemDescription : public UUW_Inv_Composite //UPDATE parent
 {
 	GENERATED_BODY()
 public:
@@ -21,6 +21,5 @@ protected:
 	//this will be the root of this WBP_X
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<USizeBox> SizeBox;
-	
 	
 };

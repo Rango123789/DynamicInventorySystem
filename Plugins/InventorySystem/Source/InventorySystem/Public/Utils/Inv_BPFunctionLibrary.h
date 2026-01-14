@@ -39,8 +39,12 @@ public:
 	static bool IsLocationWithinWidgetSize(const FVector2D& Origin, const FVector2D& PositionToCheck,
 									   const FVector2D& WidgetSize);
 	static FVector2D GetWidgetSize(const UWidget* Widget);
-	void OnItemHovered(APlayerController* PC, UItemData* HoveredItemData );
-	void OnItemUnhovered(APlayerController* PC);
+	static void OnItemHovered(APlayerController* PC, UItemData* HoveredItemData );
+	static void OnItemUnhovered(APlayerController* PC);
+
+	//the MousePosition must have origin at top-left of the BoundarySize (in this course it is LOCAL ViewportSize) to work as expected, otherwise it will clamp but in "an OFFSET way" (you don't want it) - they must all be in the same coordinates (here we choose local coordinate --> GetMousePositionInViewport(), GetCachedGeometry()->GetLocalSize() compatible with it)
+	static FVector2D GetClampedMousePosition(const FVector2D& MousePosition, const FVector2D& BoundarySize, const FVector2D& WidgetSize);
+	
 };
 
 template <typename T>

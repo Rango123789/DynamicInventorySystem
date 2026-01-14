@@ -6,6 +6,7 @@
 #include "ActorComponent/Inv_InventoryComponent.h"
 #include "Components/Widget.h"
 #include "Player/Inv_PlayerController.h"
+#include "Widgets/Inventory/UW_Inv_InventoryBase.h"
 
 //so basically "rows" param doesn't matter at all! because the direction we count [0 ---> [colum] ]
 int32 UInv_BPFunctionLibrary::GetArrayIndexFromRowAndColumnIndices(int32 InRowIndex, int32 InColumnIndex, int32 cols)
@@ -68,11 +69,76 @@ FVector2D UInv_BPFunctionLibrary::GetWidgetSize(const UWidget* Widget)
 
 void UInv_BPFunctionLibrary::OnItemHovered(APlayerController* PC, UItemData* HoveredItemData)
 {
+	if (IsValid(HoveredItemData) == false) return;
+	
 	UInv_InventoryComponent* InventoryComp = GetInventoryComponentFromPC(PC);
-	InventoryComp->WBP_
+	if (IsValid(InventoryComp) == false) return;
+
+	//it will be polymorphic, don't worry:
+	TObjectPtr<UUW_Inv_InventoryBase> WBP_InventoryBase = InventoryComp->WBP_Inventory_Spacial;
+	if (IsValid(WBP_InventoryBase) == false) return;
+
+	//why we return in this case, but not return in hover case? it is in fact no need, because you can't unhover it when it is not first hovered at first place lol.
+	//anyway this could be redudant too as WBP_ItemDescription would never be created when WBP_HoverItem is in act at first place, whatever lol.
+	if (WBP_InventoryBase->HasHoverItemInAction()) return;
+	
+	//even if now it keeps the name but its pointer is " _Base" lol
+	WBP_InventoryBase->OnItemHovered(HoveredItemData); 
+
 }
 
 void UInv_BPFunctionLibrary::OnItemUnhovered(APlayerController* PC)
 {
+	UInv_InventoryComponent* InventoryComp = GetInventoryComponentFromPC(PC);
+	if (IsValid(InventoryComp) == false) return;
 	
+	TObjectPtr<UUW_Inv_InventoryBase> WBP_InventoryBase = InventoryComp->WBP_Inventory_Spacial;
+	if (IsValid(WBP_InventoryBase) == false) return;
+	
+	//stephen didn't have this, but I add this so that it look "symmetric" lol
+	if (WBP_InventoryBase->HasHoverItemInAction()) return;
+	
+	WBP_InventoryBase->OnItemUnhovered();
+}
+
+
+/*MY equivalent idea (imperfect because it only checks on on side lol), read for fun:
+(1)
+- get MousePositionInViewport
+- make
+"WBP_ItemDesc".X = MousePositionInViewport.X + GetDesiredSize().X
+"WBP_ItemDesc".Y = MousePositionInViewport.Y
+
+(2) adapt to apply "claim", not let bottom edge to go off "Viewport bottom"
+; optionally "claim", not let right edge to go off "Viewport right" or "Viewport right - SomeArbitrary_X_Offset"
+
+"WBP_ItemDesc".Y = Min(MousePositionInViewport.Y, ViewportSize.Y - GetDesiredSize().Y)
+"WBP_ItemDesc"X = Min(MousePositionInViewport.Y + GetDesiredSize().X, ViewportSize.X - GetDesiredSize().X - SomeArbitrary_X_Offset)  */
+FVector2D UInv_BPFunctionLibrary::GetClampedMousePosition(const FVector2D& MousePosition, const FVector2D& BoundarySize,
+	const FVector2D& WidgetSize)
+{
+//step1: set ClampedMousePosition = MousePosition by default (only clamp in X and Y directly separately if needed)
+	FVector2D ClampedMousePosition = MousePosition;
+
+//step2: clamp in X direction if needed (we in fact need to clamp on both left and right sides, the order does make a slightly different)
+	if (ClampedMousePosition.X + WidgetSize.X > BoundarySize.X)
+	{
+		ClampedMousePosition.X = BoundarySize.X - WidgetSize.X;
+	}
+	if (ClampedMousePosition.X < 0)
+	{
+		ClampedMousePosition.X = 0;
+	}
+	
+//step3: clamp in Y direction if needed (we in fact need to clamp on both bottom and top sides, the order does make a slightly different)
+	if (ClampedMousePosition.Y + WidgetSize.Y > BoundarySize.Y)
+	{
+		ClampedMousePosition.Y = BoundarySize.Y - WidgetSize.Y;
+	}
+	if (ClampedMousePosition.Y < 0)
+	{
+		ClampedMousePosition.Y = 0;
+	}
+
+	return ClampedMousePosition;
 }

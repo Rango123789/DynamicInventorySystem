@@ -1152,6 +1152,9 @@ bool UUW_Inv_InventoryGrid::IsTheSameStackableItemAsHoverItem(UItemData* Clicked
  */
 void UUW_Inv_InventoryGrid::OnSlottedItemClicked(int32 ClickedUpperLeftIndex, const FPointerEvent& MouseEvent)
 {
+//remove WBP_ItemDescription before create WBP_HoverItem: (luckily we create the helper that can call anywhere!)
+	UInv_BPFunctionLibrary::OnItemUnhovered(GetOwningPlayer());
+	
 //STEP_A: access back the WBP_SlottedItem, [starting] WBP_GridSlot, WBP_GridSlot::OwningItemData from the GridSlot with that GridIndex:
 	if (GridSlots.IsValidIndex(ClickedUpperLeftIndex) == false) return;
 	if (SlottedItemMap.Contains(ClickedUpperLeftIndex) == false) return;
@@ -1282,7 +1285,8 @@ void UUW_Inv_InventoryGrid::OnSlottedItemClicked(int32 ClickedUpperLeftIndex, co
 }
 
 
-//this function triggers when we RClick on WBP_SlottedItem
+//this function triggers when we RClick on WBP_SlottedItem. Should we create "GetItemPopup" instead? well I feel the need
+//however for WBP_ItemDescription that need to show more options you may want to cache and "modify" it instead of create a new one for better performance (like the logic of items of UListView)
 void UUW_Inv_InventoryGrid::CreateItemPopupWidget(const int32& OwningIndex)
 {
 //step1: create widget

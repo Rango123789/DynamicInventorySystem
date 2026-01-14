@@ -38,12 +38,12 @@ void UUW_Inv_SlottedItem::UpdateStackCount(const int32& InStackCount) const
 
 void UUW_Inv_SlottedItem::NativeOnMouseEnter(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
-	Super::NativeOnMouseEnter(InGeometry, InMouseEvent);
+	Super::NativeOnMouseEnter(InGeometry, InMouseEvent); //stephen remove this, surely a mistake lol
 	UInv_BPFunctionLibrary::OnItemHovered(GetOwningPlayer(), OwningItemData.Get());
 }
 
 void UUW_Inv_SlottedItem::NativeOnMouseLeave(const FPointerEvent& InMouseEvent)
 {
-	Super::NativeOnMouseLeave(InMouseEvent);
+	Super::NativeOnMouseLeave(InMouseEvent); //stephen remove this, surely a mistake lol
 	UInv_BPFunctionLibrary::OnItemUnhovered(GetOwningPlayer());
 }

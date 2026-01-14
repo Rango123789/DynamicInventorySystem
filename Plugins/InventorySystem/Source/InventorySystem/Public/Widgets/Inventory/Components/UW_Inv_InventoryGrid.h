@@ -129,9 +129,11 @@ protected:
 	//we will spawn when LClick on WBP_SlottedItem and will be destroyed/invalidated when LClick is released
 	UPROPERTY(EditAnywhere, Category = "Inventory")
 	TSubclassOf<UUW_Inv_HoverItem> HoverItem_Class;
+public:
 	UPROPERTY(BlueprintReadOnly)
 	TObjectPtr<UUW_Inv_HoverItem> WBP_HoverItem;
-
+protected:
+	
 	UPROPERTY(EditAnywhere, Category = "Inventory")
 	TSubclassOf<UUW_Inv_ItemPopup> ItemPopup_Class;
 

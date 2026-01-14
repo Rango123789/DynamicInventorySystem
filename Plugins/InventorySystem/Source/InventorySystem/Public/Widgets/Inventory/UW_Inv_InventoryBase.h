@@ -15,11 +15,15 @@ UCLASS()
 class INVENTORYSYSTEM_API UUW_Inv_InventoryBase : public UUserWidget
 {
 	GENERATED_BODY()
-
+public:
 	virtual FInventoryAvailabilityInfo GetAvailabilityInfoForItem(UInv_ItemComponent* ItemComponent)
 	{
 		return FInventoryAvailabilityInfo();
-	};
+	}
+
+	virtual void OnItemHovered(UItemData* HoveredItemData){}
+	virtual void OnItemUnhovered(){}
+	virtual bool HasHoverItemInAction(){ return false; }
 protected:
 	
 };

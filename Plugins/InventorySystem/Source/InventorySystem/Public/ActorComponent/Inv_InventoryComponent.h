@@ -7,17 +7,17 @@
 #include "Types/CustomFastArrayTypes.h"
 #include "Inv_InventoryComponent.generated.h"
 
+class UUW_Inv_Inventory_Spacial;
+class UUW_Inv_InventoryBase;
 struct FInventoryAvailabilityInfo;
 class UInv_ItemComponent;
 class UItemData;
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnInventoryChanged, UItemData*, ItemData);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnInventoryChanged, UItemData*, ItemData);
 //UPDATE: we need we broadcast AvailabilityInfo (that is also just assigned AvailabilityInfo.ItemData), not ItemData (because GetAvailabilityInfoForItem(ItemData/ItemComponent) won't have AvailabilityInfo.ItemData set - this is the only exception - because whether it exist or not must be found from FastArray itself)
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnStacksChange, const FInventoryAvailabilityInfo&, AvailabilityInfo); //or UItemData also okay?
-
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FNoRoomDelegate);
 
-class UUW_Inv_Inventory_Spacial;
 
 //In this course, This come is only meant for PC:: , don't use it in other classes
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent), Blueprintable)
@@ -80,15 +80,14 @@ protected:
 	
 	//to be selected as WBP_Inventory_Spacial, don't know why STEPHEN must choose a parent pointer here? i decide to pick the bigger class, I don't fancy casting, I change it back if needed:
 	UPROPERTY(EditAnywhere, meta = (Category = "Inventory"))
-	TSubclassOf<UUW_Inv_Inventory_Spacial> InventoryClass;
-
+	TSubclassOf<UUW_Inv_InventoryBase> InventoryClass; //UPDATE: i replaceTSubclassOf<UUW_Inv_Inventory_Spacial> by this base class for generic approach - remember to reselect the class lol
 
 	//we follow good practice: if it is not the one first construct something, let's use "TWeakObjectPtr" from now on
 	TWeakObjectPtr<APlayerController> OwningPlayerController;
 public:
 	//if it is the first one construct something, let's use UPROPERTY() to hold and manage it
 	UPROPERTY()
-	TObjectPtr<UUW_Inv_Inventory_Spacial> WBP_Inventory_Spacial;
+	TObjectPtr<UUW_Inv_InventoryBase> WBP_Inventory_Spacial; //UPDATE: i replace "TObjectPtr<UUW_Inv_Inventory_Spacial>" by this base class
 private:
 	void SetupInventory();
 

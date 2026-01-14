@@ -7,6 +7,7 @@
 #include "UObject/Object.h"
 #include "ItemFragment.generated.h"
 
+class UUW_Inv_CompositeBase;
 /**
  * 
  */
@@ -14,7 +15,7 @@ USTRUCT(BlueprintType)
 struct FItemFragment
 {
 	GENERATED_BODY()
-
+	
 //always do these when you inherit from FCustomStruct for polymorphic behavior (via FInstancedStruct/LIKE)
 	FItemFragment(){}
 	FItemFragment(const FItemFragment &other) = default;
@@ -23,6 +24,11 @@ struct FItemFragment
 	FItemFragment& operator=(FItemFragment &&other) = default;
 	virtual ~FItemFragment(){}
 
+	//override it in whichever child need it (to do such assign Randomized Value ONCE or whatever)
+	//, call it when you do FItemManifest::Manifest()
+	//, you can name it "LocalManifest" or "Manifest" like stephen if you want (i.e it has the same name as the gobal ItemManifest::Manifest())
+	virtual void InitializeFragment(){}
+	
 	UPROPERTY(EditAnywhere, Category="Inventory", meta = (Categories = "Fragment"))
 	FGameplayTag FragmentTag = FGameplayTag::EmptyTag;
 };
@@ -104,6 +110,7 @@ struct FItemFragment_Grid : public FItemFragment //to keep track of how many slo
 	
 };
 
+/* moved to _Widget family
 USTRUCT(BlueprintType)
 struct FItemFragment_Image : public FItemFragment
 {
@@ -115,6 +122,7 @@ struct FItemFragment_Image : public FItemFragment
 	UPROPERTY(EditAnywhere, Category="Inventory")
 	FVector2D IconSize = FVector2D(44.f, 44.f); //Stephen call it IconDimensions
 };
+*/
 
 /*IMPORTANT:
  *because we don't make "bStackable" member here (we shouldn't neither), hence if the return of GetFragment< FItemFragment_Stackable> = nullptr we decide it is "non-stackable item" (and so values in this struct don't need to even exist nor will it make any sense for "non-stackable item" if it exists)
@@ -174,3 +182,130 @@ struct FItemFragment_Consumable_Mana : public FItemFragment_Consumable
 };
 
 /******End Consumable fragments**********/
+
+/******Widget Fragments******/
+USTRUCT(BlueprintType)
+struct FItemFragment_Widget : public FItemFragment
+{
+	GENERATED_BODY()
+
+	//can name it "expand InCompositeBase if its FragmentTag matches this ItemFragment_Widget::FragmentTag
+	virtual void Assimilate(UUW_Inv_CompositeBase* InCompositeBase) const;
+};
+
+
+USTRUCT(BlueprintType)
+struct FItemFragment_Image : public FItemFragment_Widget //NEW parent
+{
+	GENERATED_BODY()
+
+//previously
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	TObjectPtr<UTexture2D> Icon = nullptr;
+
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	FVector2D IconSize = FVector2D(44.f, 44.f); //Stephen call it IconDimensions
+
+//override stuff in NEW parent:
+	virtual void Assimilate(UUW_Inv_CompositeBase* InCompositeBase) const override;
+	
+};
+
+USTRUCT(BlueprintType)
+struct FItemFragment_Widget_Text : public FItemFragment_Widget //NEW parent
+{
+	GENERATED_BODY()
+
+//values for WBP_Leaf_X:
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	FText Text = FText::FromString("Default Text");
+
+	/*OPTION2: I like this better because it gives more control from ItemManifest side (and so you can have many WBP_Leaf_Text instances with different Font in WBP_ItemDescription)
+	//UPDATE to be exact, it is up to you, because you do side settings/alignment in WBP_ItemDescription side; and the same WBP_Widget_X can appear many times in WBP_ItemDescription (so many instances of FragmentWidget_X with different tags to distinguish them of course)
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	FSlateFontInfo FontInfo; */
+	
+//override stuff in NEW parent:
+	virtual void Assimilate(UUW_Inv_CompositeBase* InCompositeBase) const override;
+};
+
+USTRUCT(BlueprintType)
+struct FItemFragment_Widget_LabeledNumber : public FItemFragment_Widget //NEW parent
+{
+	GENERATED_BODY()
+
+//values for WBP_Leaf_X:
+	//optional switch
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	bool bCollapseLabel=false;
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	bool bCollapseValue=false;
+	
+	//For TextBlock_Label:
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	FText LabelText = FText::FromString("Default Text");
+
+	//For TextBlock_Value
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	float Value = 0.f;
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	float MinValue = 0.f;
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	float MaxValue = 0.f;
+	
+	bool bRandomizeValue = true;
+
+	//why don't just give it fixed faction digits?
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	int32 MinFractionDigits{0};	
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	int32 MaxFractionDigits{1};
+
+	//override stuff in NEW parent:
+	virtual void Assimilate(UUW_Inv_CompositeBase* InCompositeBase) const override;
+
+	//optional Initialize:
+	virtual void InitializeFragment() override;
+};
+/******End: Widget Fragments******/
+
+
+
+/*the OLD ONE that has been replaced by new pattern: keep for reference
+ *******Consumable fragments*********
+ * we only add FItemFragment_Consumable_X,Y,Z on BP_Item::ItemManifest::ItemFragments
+ * we do GetFragmentByType<FItemFragment_Consumable>()->OnConsume() it will auto trigger the child version
+USTRUCT(BlueprintType)
+struct FItemFragment_Consumable : public FItemFragment
+{
+	GENERATED_BODY()
+
+	//this is where the magic of polymorphism begins:
+	virtual void OnConsume(APlayerController* PC){};
+};
+
+USTRUCT(BlueprintType)
+struct FItemFragment_Consumable_Health : public FItemFragment_Consumable
+{
+	GENERATED_BODY()
+
+	//different BP_HealthPotion_X,Y,Z simply adjust this value differently! yeah!
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	float Health = 20.f;
+	
+	virtual void OnConsume(APlayerController* PC) override;
+};
+
+USTRUCT(BlueprintType)
+struct FItemFragment_Consumable_Mana : public FItemFragment_Consumable
+{
+	GENERATED_BODY()
+	
+	//different BP_ManaPotion_X,Y,Z simply adjust this value differently! yeah!
+	UPROPERTY(EditAnywhere, Category="Inventory")
+	float Mana = 50.f;
+	
+	virtual void OnConsume(APlayerController* PC) override;
+};
+
+******End Consumable fragments**********/

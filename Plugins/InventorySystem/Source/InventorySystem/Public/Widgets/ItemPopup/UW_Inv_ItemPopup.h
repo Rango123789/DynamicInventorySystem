@@ -35,7 +35,6 @@ protected:
 	virtual void NativeOnInitialized() override;
 	//you can decide to add "X" button" to close it if you want, but this is the quickest way to close it! hell yeah I see it a lot in games but don't know how to do it!
 	virtual void NativeOnMouseLeave(const FPointerEvent& InMouseEvent) override;
-
 	
 	UFUNCTION()
 	void OnSplitButtonClickedCallback();
@@ -46,7 +45,6 @@ protected:
 	UFUNCTION()
 	void OnSplitSliderValueChanged(float Value);
 
-	
 	//for stackable item only
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> Button_SplitStacks; 

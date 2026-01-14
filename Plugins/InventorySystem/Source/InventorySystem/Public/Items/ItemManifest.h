@@ -27,9 +27,10 @@ struct FItemManifest
 
 	/*By "manifest an item data" here i mean "newly create an item data, and then assign this ItemManifest/ItemProperties/ItemDetails to the CreatedItemData
 	  Outer should be passed as PC/PC::InventoryComponent for the sake of the requirement of an Outer for replication:*/
-	UItemData* ManifestItemData(UObject* Outer) const;
-
+	UItemData* ManifestItemData(UObject* Outer);
 	void SpawnDroppedItem(UObject* WorldObjectContext, const FVector& SpawnLocation, const FRotator& SpawnRotation);
+	void AssimilateWidgetFragmentsToCompositeWidget(UUW_Inv_CompositeBase* CompositeBase) const; //you can use "_Composite" at this level for our intention if you want. but why would you make it less versatile lol
+	
 
 	//For each BP_Item_X, we must select BP_Item_X:::ItemClassToSpawn = BP_Item_X itself to spawn it back! yeah!
 	UPROPERTY(EditAnywhere, Category="Inventory")
@@ -59,6 +60,9 @@ struct FItemManifest
 	template <class T>
 	requires std::derived_from<T, FItemFragment> //this is new to me, but old in C++
 	const T* GetItemFragmentByType() const;
+	template <class T>
+	requires std::derived_from<T, FItemFragment> //this is new to me, but old in C++
+	TArray<const T*> GetAllFragmentsByType() const;
 
 	template <class T>
 	requires std::derived_from<T, FItemFragment>
@@ -107,7 +111,7 @@ const T* FItemManifest::GetItemFragmentByTag(const FGameplayTag& FragmentTag) co
 template <class T> requires std::derived_from<T, FItemFragment>
 const T* FItemManifest::GetItemFragmentByType() const
 {
-		for (const TInstancedStruct<FItemFragment>& ItemFragmentWrapper : ItemFragments)
+	for (const TInstancedStruct<FItemFragment>& ItemFragmentWrapper : ItemFragments)
 	{
 		if (const T* ItemFragmentPointer = ItemFragmentWrapper.GetPtr<T>())
 		{
@@ -117,6 +121,23 @@ const T* FItemManifest::GetItemFragmentByType() const
 	
 	return nullptr;
 }
+
+template <class T> requires std::derived_from<T, FItemFragment>
+TArray<const T*> FItemManifest::GetAllFragmentsByType() const
+{
+	TArray<const T*> AllFragments;
+
+	for (const TInstancedStruct<FItemFragment>& ItemFragmentWrapper : ItemFragments)
+	{
+		if (const T* ItemFragmentPointer = ItemFragmentWrapper.GetPtr<T>())
+		{
+			AllFragments.Add(ItemFragmentPointer);
+		}
+	}
+
+	return AllFragments;
+}
+
 
 //remove all const
 template <class T> requires std::derived_from<T, FItemFragment>
